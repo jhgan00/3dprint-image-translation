@@ -9,7 +9,7 @@ from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-from dataset import CustomDataset, TestDataset
+from dataset import CustomDataset
 from engine import train_one_epoch, evaluate, generate
 from losses import GANLoss, VGGPerceptualLoss
 from networks import ResnetGenerator, UNetGenerator, NLayerDiscriminator, init_weights, get_norm_layer
@@ -23,7 +23,7 @@ def get_args():
     parser.add_argument('--lambda_L1', type=float, default=0.)
     parser.add_argument('--lambda_VGG', type=float, default=100.,
                         help='weight for the content(VGG) loss (originally proposed in SRGAN)')
-    parser.add_argument('--smoothing', type=float, default=0.1)
+    parser.add_argument('--smoothing', type=float, default=0.2)
 
     # model parameters
     parser.add_argument('--netG', type=str, default='resnet', choices=['unet', 'resnet'])
@@ -43,13 +43,11 @@ def get_args():
                         help='scaling factor for normal, xavier and orthogonal.')
 
     # dataset parameters
-    # parser.add_argument('--src_dir', type=str, default='./data/base')
-    # parser.add_argument('--dst_dir', type=str, default='./data/00')
-    # parser.add_argument('--csv_fpath', type=str, default='./data/00.csv')
-    # parser.add_argument('--use_validset', action="store_true")
-    parser.add_argument('--src_dir', type=str, default='./data/base')
-    parser.add_argument('--dst_dir', type=str, default='./data/15')
-    parser.add_argument('--csv_fpath', type=str, default='./data/after_scale.csv')
+    # 1% 데이터셋 경로
+    parser.add_argument('--src_dir', type=str, default='/home/hdjoong/3D/TrainImages/Blueprint')
+    parser.add_argument('--dst_dir', type=str, default='/home/hdjoong/3D/TrainImages/Mash')
+    parser.add_argument('--csv_fpath', type=str, default='/home/hdjoong/3D/Metadata/data.csv')
+    parser.add_argument('--use_validset', action="store_true")
 
     parser.add_argument('--test_src_dir', type=str, default='./data/test/AI_dataset_all')
     parser.add_argument('--test_csv_fpath', type=str, default='./data/test/label.scaled.csv')
@@ -66,26 +64,27 @@ def get_args():
     parser.add_argument('--lr_decay_iters', type=int, default=25)
 
     # misc
-    parser.add_argument('--device', type=str, default='cuda:0')
+    parser.add_argument('--device', type=str, default='cuda:1')
     parser.add_argument('--checkpoints_dir', type=str, default='./checkpoints', help='models are saved here')
     parser.add_argument('--log_dir', type=str, default='./logs')
     parser.add_argument('--output_dir', type=str, default='./outputs')
     parser.add_argument('--log_freq', type=int, default=10)
     parser.add_argument('--display_freq', type=int, default=10)
     parser.add_argument('--ckpt_freq', type=int, default=50, help='save model for evey n epochs')
-    parser.add_argument('--expr_name', type=str, default=str(datetime.now()))
+    parser.add_argument('--expr_name', type=str, default="one-cycle")
     parser.add_argument('--seed', type=int, default=777)
 
     args = parser.parse_args()
-    # args.expr_name = f"bs-{args.batch_size}-vgg-{args.lambda_VGG}-l1-{args.lambda_L1}-norm-{args.norm_type}-dropout-{not args.no_dropout}-smoothing-{args.smoothing}-dlayers-{args.n_layers_D}-enc-dropout"
     args.log_dir = os.path.join(args.log_dir, args.expr_name)
     args.output_dir = os.path.join(args.output_dir, args.expr_name)
     args.checkpoints_dir = os.path.join(args.checkpoints_dir, args.expr_name)
 
     if not os.path.exists(args.checkpoints_dir):
-        os.makedirs(args.checkpoints_dir, exist_ok=False)
-    if not os.path.exists(args.output_dir):
-        os.makedirs(args.output_dir, exist_ok=False)
+        os.makedirs(args.checkpoints_dir)
+    if not os.path.exists(os.path.join(args.output_dir, "real")):
+        os.makedirs(os.path.join(args.output_dir, "real"))
+    if not os.path.exists(os.path.join(args.output_dir, "fake")):
+        os.makedirs(os.path.join(args.output_dir, "fake"))
     args.total_epochs = args.n_epochs + args.n_epochs_decay
     return args
 
@@ -107,13 +106,29 @@ def main(args):
     np.random.seed(args.seed)
     random.seed(args.seed)
 
+    criterionGAN = GANLoss(args.gan_mode, target_real_label=1 - args.smoothing, target_fake_label=args.smoothing).to(device)
+    criterionL1  = torch.nn.L1Loss()
+    criterionVGG = VGGPerceptualLoss().to(device)
+
+    # get dataset
+    train_dataset = CustomDataset(args.src_dir, args.dst_dir, args.csv_fpath, split="train")
+    train_size = int(0.8 * len(train_dataset))
+    test_size = len(train_dataset) - train_size
+    train_dataset, test_dataset = torch.utils.data.random_split(train_dataset, [train_size, test_size])
+
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, pin_memory=True,
+                              num_workers=args.num_threads)
+    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, pin_memory=True,
+                             num_workers=args.num_threads)
+
     # get model
+    num_embeddings = train_dataset.dataset.conditions.shape[1]
     use_dropout = not args.no_dropout
     if args.netG == 'unet':
         netG = UNetGenerator(output_nc=args.output_nc, input_nc=args.input_nc, norm_type=args.norm_type).to(device)
     else:
         norm_layer = get_norm_layer(args.norm_type)
-        netG = ResnetGenerator(args.input_nc, args.output_nc, args.ngf, norm_layer=norm_layer,
+        netG = ResnetGenerator(args.input_nc, args.output_nc, num_embeddings, args.ngf, norm_layer=norm_layer,
                                use_dropout=use_dropout, n_blocks=args.n_layers_G).to(device)
     netD = NLayerDiscriminator(input_nc=args.input_nc + args.output_nc, ndf=args.ndf, n_layers=args.n_layers_D).to(
         device)
@@ -121,34 +136,11 @@ def main(args):
     init_weights(netG, args.init_type, args.init_gain)
     init_weights(netD, args.init_type, args.init_gain)
 
-    criterionGAN = GANLoss(args.gan_mode, target_real_label=1 - args.smoothing, target_fake_label=args.smoothing).to(device)
-    criterionL1  = torch.nn.L1Loss()
-    criterionVGG = VGGPerceptualLoss().to(device)
-
     optimizer_G = torch.optim.Adam(netG.parameters(), lr=args.lr, betas=(args.beta1, 0.999))
     optimizer_D = torch.optim.Adam(netD.parameters(), lr=args.lr, betas=(args.beta1, 0.999))
 
     scheduler_G = StepLR(optimizer_G, step_size=args.lr_decay_iters)
     scheduler_D = StepLR(optimizer_D, step_size=args.lr_decay_iters)
-
-    # get dataset
-    train_dataset = CustomDataset(args.src_dir, args.dst_dir, args.csv_fpath, args.input_size, split="train")
-
-    # if args.use_validset:
-    #     n = len(train_dataset)
-    #     train_size = int(n * 0.9)
-    #     valid_size = n - train_size
-    #     train_dataset, valid_dataset = torch.utils.data.random_split(train_dataset, (train_size, valid_size))
-    # else:
-    #     valid_dataset = CustomDataset(args.src_dir, args.dst_dir, args.csv_fpath, args.input_size, split="test")
-    test_dataset = TestDataset(args.test_src_dir, args.test_csv_fpath, args.input_size)
-
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, pin_memory=True,
-                              num_workers=args.num_threads)
-    # valid_loader = DataLoader(valid_dataset, batch_size=args.batch_size, shuffle=False, pin_memory=True,
-    #                           num_workers=args.num_threads)
-    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, pin_memory=True,
-                             num_workers=args.num_threads)
 
     # get tensorboard log writer
     if args.log_dir is not None:
@@ -174,8 +166,8 @@ def main(args):
             args
         )
 
-        # evaluate(netG, valid_loader, epoch, device, log_writer, args)
-        generate(netG, test_loader, epoch, device, save_images=False, log_writer=log_writer, args=args)
+        evaluate(netG, test_loader, epoch, device, log_writer, args)
+        # generate(netG, test_loader, epoch, device, save_images=False, log_writer=log_writer, args=args)
 
         # if not epoch % args.ckpt_freq:
         #     save_path = os.path.join(args.checkpoints_dir, f'checkpoint-{epoch}.pth')

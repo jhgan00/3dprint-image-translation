@@ -1,9 +1,10 @@
 import os
+import numpy as np
 
 import torch
 from torchvision.utils import make_grid, save_image
 
-from metric import mean_pixel_loss, mean_absolute_cri_error
+from metric import ScoreMetric, mean_pixel_loss
 
 
 def set_requires_grad(nets, requires_grad=False):
@@ -27,11 +28,11 @@ def train_one_epoch(G: torch.nn.Module, D: torch.nn.Module, optimG: torch.nn.Mod
         schedG.step()
         schedD.step()
 
-    for iter, (real_A, real_B, cond) in enumerate(train_loader, 1):
+    for iter, (real_A, real_B, cond, _) in enumerate(train_loader, 1):
 
         real_A = real_A.to(device)
         real_B = real_B.to(device)
-        cond = cond.to(device)
+        cond = cond.to(device).float()
 
         with torch.cuda.amp.autocast():
             fake_B = G(real_A, cond)  # G(A)
@@ -97,34 +98,42 @@ def evaluate(G: torch.nn.Module, data_loader: torch.utils.data.DataLoader, epoch
     print(f"Validation at epoch [{epoch}/{args.total_epochs}]")
 
     G.eval()
-    true_images = []
+    real_images = []
     fake_images = []
-    for src, dst, cond in data_loader:
+    real_errors = []
+
+    for src, dst, cond, real_error in data_loader:
         src = src.to(device)
-        cond = cond.to(device)
+        cond = cond.to(device).float()
         fake = G(src, cond)
-        fake_images.append(fake.detach())
-        true_images.append(dst.detach())
 
-    fake_images = (torch.cat(fake_images) + 1) * 0.5 * 255.
-    fake_images = fake_images.to("cpu").squeeze()
+        real_images.append(dst.detach().cpu())
+        fake_images.append(fake.detach().cpu())
+        real_errors.append(real_error.float().detach())
 
-    true_images = (torch.cat(true_images) + 1) * 0.5 * 255.
-    true_images = true_images.to("cpu").squeeze()
+    real_images = torch.cat(real_images)
+    fake_images = torch.cat(fake_images)
 
-    pix_error = mean_pixel_loss(fake_images, true_images)
-    cri_error, cri_error_array = mean_absolute_cri_error(fake_images, true_images, return_error_array=True)
+    log_writer.add_image('images/test_gen', make_grid(fake_images, nrow=2, value_range=(-1, 1), normalize=True), epoch)
 
-    log_writer.add_scalar("metric/pixel loss", pix_error, global_step=epoch)
-    log_writer.add_scalar("metric/cri_error", cri_error, global_step=epoch)
-    log_writer.add_histogram("metric/cri_error_hist", cri_error_array, global_step=epoch)
+    real_images = (real_images * 0.5) + 0.5  # (-1, 1) -> (0, 1)
+    fake_images = (fake_images * 0.5) + 0.5  # (-1, 1) -> (0, 1)
 
-    print(f"* Mean Pix error: {pix_error:.4f}")
-    print(f"* Mean CRI error: {cri_error:.4f}")
-    print(f"* # of samples (CRI error < 20): {(cri_error_array<20).sum()} / {len(data_loader.dataset)}")
-    print("=" * 80)
+    for org_filename, fake_img in zip(data_loader.dataset.dataset.dst_images, fake_images):
+        save_path = os.path.join(args.output_dir, "fake", os.path.basename(org_filename))
+        save_image(fake_img, save_path)
 
-    return pix_error, cri_error
+    for org_filename, real_img in zip(data_loader.dataset.dataset.dst_images, real_images):
+        save_path = os.path.join(args.output_dir, "real", os.path.basename(org_filename))
+        save_image(real_img, save_path)
+
+    real_images = real_images * 255
+    fake_images = fake_images * 255
+
+    l1_pix_loss = mean_pixel_loss(fake_images, real_images)
+    log_writer.add_scalar('text/Pixel Loss', l1_pix_loss, global_step=epoch)
+
+    return None
 
 
 @torch.no_grad()
@@ -132,7 +141,7 @@ def generate(G: torch.nn.Module, data_loader: torch.utils.data.DataLoader, epoch
              save_images: bool, log_writer, args):
     G.eval()
     fake_images = []
-    for src, cond in data_loader:
+    for src, _, cond, real_error in data_loader:
         src = src.to(device)
         cond = cond.to(device)
         fake = G(src, cond)

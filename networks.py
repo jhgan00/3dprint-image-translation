@@ -29,7 +29,7 @@ def get_norm_layer(norm_type='instance'):
 
 class ResnetGenerator(nn.Module):
 
-    def __init__(self, input_nc, output_nc, ngf=64, norm_layer=nn.BatchNorm2d, use_dropout=False, n_blocks=6, padding_type='reflect'):
+    def __init__(self, input_nc, output_nc, num_embeddings, ngf=64, norm_layer=nn.BatchNorm2d, use_dropout=False, n_blocks=6, padding_type='reflect'):
         """Construct a Resnet-based generator
         Parameters:
             input_nc (int)      -- the number of channels in input images
@@ -83,7 +83,7 @@ class ResnetGenerator(nn.Module):
         self.down = nn.Sequential(*down)
         self.res = nn.Sequential(*res)
         self.up = nn.Sequential(*up)
-        self.condition_embedding = ConditionEmbedding(7, 256)
+        self.condition_embedding = ConditionEmbedding(num_embeddings, 256)
 
     def forward(self, x, cond):
         """Standard forward w/ condition embeddings"""
@@ -410,9 +410,9 @@ class UNetGenerator(nn.Module):
 
 
 if __name__ == "__main__":
-    x = torch.normal(0, 1, (1, 1, 256, 256))
+    x = torch.normal(0, 1, (1, 1, 260, 260))
     cond = torch.FloatTensor([0, 0, 0, 0, 0, 0, 0])
-    netG = ResnetGenerator(1, 1, 64, norm_layer=get_norm_layer('instance'), use_dropout=True, n_blocks=9)
+    netG = ResnetGenerator(1, 1, num_embeddings=7, ngf=64, norm_layer=get_norm_layer('instance'), use_dropout=True, n_blocks=9)
     netD = NLayerDiscriminator(input_nc=2, ndf=32, n_layers=6)
-    fake = torch.normal(0, 1, (1, 2, 256, 256))
-    netD(fake, cond, netG.condition_embedding.embeddings)
+    fake = netG(x, cond)
+    print(fake.shape)
