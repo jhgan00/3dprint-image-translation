@@ -34,9 +34,9 @@ def get_args():
     parser.add_argument('--output_nc', type=int, default=1,
                         help='# of output image channels: 3 for RGB and 1 for grayscale')
     parser.add_argument('--ngf', type=int, default=64, help='# of gen filters in the last conv layer')
-    parser.add_argument('--ndf', type=int, default=32, help='# of disc filters in the first conv layer')
+    parser.add_argument('--ndf', type=int, default=64, help='# of disc filters in the first conv layer')
     parser.add_argument('--n_layers_G', type=int, default=9, help='only used if netD==n_layers')
-    parser.add_argument('--n_layers_D', type=int, default=3, help='only used if netD==n_layers')
+    parser.add_argument('--n_layers_D', type=int, default=2, help='only used if netD==n_layers')
     parser.add_argument('--init_type', type=str, default='normal',
                         help='network initialization [normal | xavier | kaiming | orthogonal]')
     parser.add_argument('--init_gain', type=float, default=0.02,
@@ -44,16 +44,14 @@ def get_args():
 
     # dataset parameters
     # 1% 데이터셋 경로
-    parser.add_argument('--src_dir', type=str, default='/home/hdjoong/3D/TrainImages/Blueprint')
-    parser.add_argument('--dst_dir', type=str, default='/home/hdjoong/3D/TrainImages/Mash')
-    parser.add_argument('--csv_fpath', type=str, default='/home/hdjoong/3D/Metadata/data.csv')
+    parser.add_argument('--src_dir', type=str, default='./data/Blueprint')
+    parser.add_argument('--dst_dir', type=str, default='./data/Mash')
+    parser.add_argument('--csv_fpath', type=str, default='./data/Metadata/data.csv')
     parser.add_argument('--use_validset', action="store_true")
 
-    parser.add_argument('--test_src_dir', type=str, default='./data/test/AI_dataset_all')
-    parser.add_argument('--test_csv_fpath', type=str, default='./data/test/label.scaled.csv')
     parser.add_argument('--num_threads', default=2, type=int, help='# threads for loading data')
     parser.add_argument('--batch_size', type=int, default=2, help='input batch size')
-    parser.add_argument('--input_size', type=int, default=256, help='scale images to this size')
+    parser.add_argument('--input_size', type=int, default=512, help='scale images to this size')
 
     # training parameters
     parser.add_argument('--n_epochs', type=int, default=100, help='number of epochs with the initial learning rate')
@@ -71,7 +69,7 @@ def get_args():
     parser.add_argument('--log_freq', type=int, default=10)
     parser.add_argument('--display_freq', type=int, default=10)
     parser.add_argument('--ckpt_freq', type=int, default=50, help='save model for evey n epochs')
-    parser.add_argument('--expr_name', type=str, default="one-cycle")
+    parser.add_argument('--expr_name', type=str, default=str(datetime.now()))
     parser.add_argument('--seed', type=int, default=777)
 
     args = parser.parse_args()

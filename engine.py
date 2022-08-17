@@ -1,10 +1,9 @@
 import os
-import numpy as np
 
 import torch
 from torchvision.utils import make_grid, save_image
 
-from metric import ScoreMetric, mean_pixel_loss
+from metric import mean_pixel_loss
 
 
 def set_requires_grad(nets, requires_grad=False):
@@ -130,8 +129,8 @@ def evaluate(G: torch.nn.Module, data_loader: torch.utils.data.DataLoader, epoch
     real_images = real_images * 255
     fake_images = fake_images * 255
 
-    l1_pix_loss = mean_pixel_loss(fake_images, real_images)
-    log_writer.add_scalar('text/Pixel Loss', l1_pix_loss, global_step=epoch)
+    l1_pix_loss = mean_pixel_loss(fake_images.squeeze(), real_images.squeeze())
+    log_writer.add_scalar('test/Pixel Loss', l1_pix_loss, global_step=epoch)
 
     return None
 
