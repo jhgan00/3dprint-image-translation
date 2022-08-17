@@ -5,106 +5,10 @@ import os
 import cv2
 import numpy as np
 import pandas as pd
-import torch
-import torch.nn as nn
+
 from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
-from torchvision.transforms.functional import to_pil_image
-import torch.nn.functional as F_
-
-
-sigmoid = nn.Sigmoid()
-tanh = nn.Tanh()
-resize = transforms.Compose([transforms.Resize((512, 512), interpolation=transforms.InterpolationMode.BICUBIC)])
-
-x_h, x_w = 480, 2064
-y_h, y_w = 200, 2096
-
-
-def build_transform(input_size):
-    t = [transforms.Resize(input_size, interpolation=transforms.InterpolationMode.BICUBIC)]
-    t.append(transforms.ToTensor())
-    return transforms.Compose(t)
-
-
-class CustomDataset(Dataset):
-    def __init__(self, src_dir, dst_dir, csv_fpath, split=False):
-        """도면 이미지, 출력 이미지, 프린터 파라미터, 변형률 정보"""
-        self.split = split
-        self.df = pd.read_csv(csv_fpath, encoding='utf-8-sig').fillna(0.)
-        self.src_images = self.df['src']
-        self.dst_images = self.df['dst']
-        self.conditions = self.df.iloc[:, 2:-8].values
-        self.real_error = self.df['Avg']
-        self.src_dir = src_dir
-        self.dst_dir = dst_dir
-
-    def __getitem__(self, i):
-        src = cv2.imread(os.path.join(self.src_dir, self.src_images[i]), cv2.IMREAD_GRAYSCALE)[900:1450, 250:2404]
-        axis = self.src_images[i].split('.')[0][-1]
-        dst = cv2.imread(os.path.join(self.dst_dir, f'{axis}', self.dst_images[i]))[900:1450, 250:2404, :]
-        dst = cv2.cvtColor(dst, cv2.COLOR_BGR2RGB)
-        dst = np.where(np.repeat((dst >= 128).all(axis=-1)[:, :, np.newaxis], 3, -1), 0, dst)
-        src_thresh = cv2.threshold(src, 127, 255, cv2.THRESH_BINARY)[1]
-        src_contours, src_hierarchy = cv2.findContours(src_thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-        src_contours = list(src_contours)
-        src_contours.sort(key=cv2.contourArea)
-        contra_mask, expand_mask = get_mask(src)
-        contour_index = -2
-        if axis == 'X':
-            input_size = x_h, x_w
-            the_contour = src_contours[contour_index]
-            x, y, w, h = cv2.boundingRect(the_contour)
-            src_thresh = src_thresh[y:y + h, x:x + w]
-            contra_masked = cv2.bitwise_and(dst, dst, mask=contra_mask)[y:y + h, x:x + w]
-            expand_masked = cv2.bitwise_and(dst, dst, mask=expand_mask)[y:y + h, x:x + w]
-            contra_masked = cv2.cvtColor(contra_masked, cv2.COLOR_RGB2GRAY)
-            expand_masked = cv2.cvtColor(expand_masked, cv2.COLOR_RGB2GRAY)
-            target_1 = cv2.threshold(contra_masked, 127, 255, cv2.THRESH_BINARY)[1]
-            target_2 = cv2.threshold(expand_masked, 127, 255, cv2.THRESH_BINARY)[1]
-            tf = build_transform(input_size)
-            src = tanh(tf(Image.fromarray(src_thresh)))
-            dst = tanh(tf(Image.fromarray(-1 * target_1 + target_2)))
-            p2d = (int((y_w - x_w) / 2), int((y_w - x_w) / 2), int((y_w - x_h) / 2), int((y_w - x_h) / 2))
-            src, dst = resize(F_.pad(src, p2d, 'constant', 0)), resize(F_.pad(dst, p2d, 'constant', 0))
-
-        elif axis == 'Y':
-            input_size = y_h, y_w
-            l_the_contour = src_contours[contour_index]
-            l_x, l_y, l_w, l_h = cv2.boundingRect(l_the_contour)
-            r_the_contour = src_contours[contour_index - 1]
-            r_x, r_y, r_w, r_h = cv2.boundingRect(r_the_contour)
-            src_thresh = src_thresh[min(l_y, r_y):max(l_y + l_h, r_y + r_h), min(l_x, r_x):max(l_x + r_w, r_x + r_w)]
-            contra_masked = cv2.bitwise_and(dst, dst, mask=contra_mask)
-            expand_masked = cv2.bitwise_and(dst, dst, mask=expand_mask)
-            contra_masked = contra_masked[min(l_y, r_y):max(l_y + l_h, r_y + r_h),
-                            min(l_x, r_x):max(l_x + r_w, r_x + r_w)]
-            expand_masked = expand_masked[min(l_y, r_y):max(l_y + l_h, r_y + r_h),
-                            min(l_x, r_x):max(l_x + r_w, r_x + r_w)]
-            contra_masked = cv2.cvtColor(contra_masked, cv2.COLOR_RGB2GRAY)
-            expand_masked = cv2.cvtColor(expand_masked, cv2.COLOR_RGB2GRAY)
-            target_1 = cv2.threshold(contra_masked, 127, 255, cv2.THRESH_BINARY)[1]
-            target_2 = cv2.threshold(expand_masked, 127, 255, cv2.THRESH_BINARY)[1]
-            tf = build_transform(input_size)
-            src = tanh(tf(Image.fromarray(src_thresh)))
-            dst = tanh(tf(Image.fromarray(-1 * target_1 + target_2)))
-            p2d = (0, 0, int((y_w - y_h) / 2), int((y_w - y_h) / 2))
-            src, dst = resize(F_.pad(src, p2d, 'constant', 0)), resize(F_.pad(dst, p2d, 'constant', 0))
-        conditions = self.conditions[i]
-        real_error = self.real_error[i]
-
-        if self.split == "train":
-            if random.random() > 0.5:
-                src = transforms.functional.hflip(src)
-                dst = transforms.functional.hflip(dst)
-            angle = random.randint(-30, 30)
-            src = transforms.functional.rotate(src, angle)
-            dst = transforms.functional.rotate(dst, angle)
-        return tanh(src), tanh(dst), conditions, real_error
-
-    def __len__(self):
-        return len(self.src_images)
 
 
 def parse_levels(hierarchy):
@@ -164,7 +68,7 @@ def get_mask(src_image):
 
     # 컨투어 레벨 파싱
     # 컨투어가 제대로 검출되었다면 컨투어의 레벨은 2개 또는 4개임
-    # 컨투어의 레벨은 4개 보다 많은 수 없음. 한번 구멍을 뚫으면 빈 공간이기 때문에 그 안에 다시 구멍이 생길 수 없음.
+    # 컨투어의 레벨은 4개 보다 많을 수 없음. 왜? 한번 구멍을 뚫으면 빈 공간이기 때문에 그 안에 다시 구멍이 생길 수 없음.
     level_dict = parse_levels(hierarchy)
     assert len(level_dict) in {2, 4}, f"컨투어를 올바르게 검출하지 못했습니다: {len(level_dict)} 개의 컨투어 레벨이 검출됨"
 
@@ -172,7 +76,7 @@ def get_mask(src_image):
     expand_mask = np.ones_like(thresh, dtype=np.uint8) * 255
 
     # 팽창 마스크 : outer 컨투어 밖은 하얗고 안은 까맣게
-    pts = [contours[i] for i in level_dict[0]]
+    pts = [contours[i] for i in level_dict[0]]  # 레벨 0에 해당하는 컨투어들의 인덱스
     cv2.fillPoly(expand_mask, pts=pts, color=(0, 0, 0))  # 안쪽을 검은색으로 채우기
 
     # 수축 마스크 : inner 컨투어 밖은 까맣고 안은 하얗게
@@ -193,3 +97,114 @@ def get_mask(src_image):
         cv2.fillPoly(expand_mask, pts=pts, color=(255, 255, 255))  # 안쪽을 흰색으로 채우기
 
     return contra_mask, expand_mask
+
+
+def square_padding(image, value=0):
+    """ 높이, 너비 중 긴쪽에 맞춰서 정사각형으로 패딩 """
+    max_wh = max(image.size)
+    p_left, p_top = [(max_wh - s) // 2 for s in image.size]
+    p_right, p_bottom = [max_wh - (s + pad) for s, pad in zip(image.size, [p_left, p_top])]
+    padding = (p_left, p_top, p_right, p_bottom)
+    return transforms.functional.pad(image, padding, value, 'constant')
+
+
+class CustomDataset(Dataset):
+
+    def __init__(self, src_dir, dst_dir, csv_fpath, input_size=512, split=False, threshold=0):
+
+        """도면 이미지, 출력 이미지, 프린터 파라미터, 변형률 정보"""
+
+        self.split = split
+
+        df = pd.read_csv(csv_fpath, encoding='utf-8-sig')
+
+        self.src_images = df['src']
+        self.dst_images = df['dst']
+        self.conditions = df.iloc[:, 2:-8].values
+        self.real_error = df['Out.Tol.(%)']
+
+        self.src_dir = src_dir
+        self.dst_dir = dst_dir
+
+        self.threshold = threshold
+        self.input_size = input_size
+
+    def __getitem__(self, i):
+
+        # 이미지 경로
+        src_fpath = os.path.join(self.src_dir, self.src_images[i])
+        dst_fpath = os.path.join(self.dst_dir, self.dst_images[i])
+
+        # 이미지 읽기
+        src = cv2.imread(src_fpath, cv2.IMREAD_GRAYSCALE)
+        contra_mask, expand_mask = get_mask(src)
+        blur = cv2.GaussianBlur(255 - src, (5, 5), 5)
+        _, src = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+        # 패딩 & NEAREST 리사이즈: BICUBIC 리사이징 하는 경우 리사이징 알고리즘으로 인해 값이 틀어짐
+        src = square_padding(Image.fromarray(src), value=0)
+        src = transforms.functional.resize(src, (self.input_size, self.input_size),
+                                           interpolation=transforms.InterpolationMode.NEAREST)
+        src = transforms.functional.to_tensor(src)
+        src = transforms.functional.normalize(src, (0.5,), (0.5,))
+
+        # 패딩 & 리사이즈를 먼저 하기: 처리를 다 하고 나중에 BICUBIC 리사이징 하는 경우 리사이징 알고리즘으로 인해 값이 틀어짐
+        dst = Image.open(dst_fpath)
+        dst = square_padding(dst, value=255)
+        dst = transforms.functional.resize(dst, (self.input_size, self.input_size),
+                                           interpolation=transforms.InterpolationMode.BICUBIC)
+        dst = np.array(dst)
+
+        contra_mask = square_padding(Image.fromarray(contra_mask), value=0)
+        contra_mask = transforms.functional.resize(contra_mask, (self.input_size, self.input_size),
+                                                   interpolation=transforms.InterpolationMode.NEAREST)
+        contra_mask = np.array(contra_mask)
+
+        expand_mask = square_padding(Image.fromarray(expand_mask), value=0)
+        expand_mask = transforms.functional.resize(expand_mask, (self.input_size, self.input_size),
+                                                   interpolation=transforms.InterpolationMode.NEAREST)
+        expand_mask = np.array(expand_mask)
+
+        # 타겟의 배경을 흰색에서 검은색으로 전환
+        dst = np.where(np.repeat((dst >= 128).all(axis=-1)[:, :, np.newaxis], 3, -1), 0, dst)
+
+        # 실제로 마스크를 씌우기
+        contra_masked = cv2.bitwise_and(dst, dst, mask=contra_mask)
+        expand_masked = cv2.bitwise_and(dst, dst, mask=expand_mask)
+
+        contra_masked = cv2.cvtColor(contra_masked, cv2.COLOR_RGB2GRAY)
+        expand_masked = cv2.cvtColor(expand_masked, cv2.COLOR_RGB2GRAY)
+
+        # 마스크 적용
+        target_1 = np.where(contra_masked > 1, 1., 0.)
+        target_2 = np.where(expand_masked > 1, 1., 0.)
+
+        # 타겟 이미지 생성
+        dst = (-target_1 + target_2 + 1.) * 0.5
+        dst = Image.fromarray(dst)
+        dst = transforms.functional.to_tensor(dst)
+        dst = transforms.functional.normalize(dst, (0.5,), (0.5,))
+
+        # Augmentation 적용
+        if self.split == "train":
+
+            if random.random() > 0.5:
+                src = transforms.functional.hflip(src)
+                dst = transforms.functional.hflip(dst)
+
+            if random.random() > 0.5:
+                src = transforms.functional.vflip(src)
+                dst = transforms.functional.vflip(dst)
+
+            angle = random.choice([0, 90, 180, 270])
+            src = transforms.functional.rotate(src, angle)
+            dst = transforms.functional.rotate(dst, angle)
+
+        conditions = self.conditions[i]
+        real_error = self.real_error[i]
+
+        return src, dst, conditions, real_error
+
+    def __len__(self):
+
+        return len(self.src_images)
