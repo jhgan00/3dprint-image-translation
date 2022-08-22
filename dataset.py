@@ -2,6 +2,7 @@ import random
 from collections import defaultdict
 import os
 
+import torch
 import cv2
 import numpy as np
 import pandas as pd
@@ -108,6 +109,7 @@ def square_padding(image, value=0):
     return transforms.functional.pad(image, padding, value, 'constant')
 
 
+
 class CustomDataset(Dataset):
 
     def __init__(self, src_dir, dst_dir, csv_fpath, input_size=512, split=False, threshold=0):
@@ -160,7 +162,7 @@ class CustomDataset(Dataset):
                                                    interpolation=transforms.InterpolationMode.NEAREST)
         contra_mask = np.array(contra_mask)
 
-        expand_mask = square_padding(Image.fromarray(expand_mask), value=0)
+        expand_mask = square_padding(Image.fromarray(expand_mask), value=255)
         expand_mask = transforms.functional.resize(expand_mask, (self.input_size, self.input_size),
                                                    interpolation=transforms.InterpolationMode.NEAREST)
         expand_mask = np.array(expand_mask)
@@ -172,18 +174,13 @@ class CustomDataset(Dataset):
         contra_masked = cv2.bitwise_and(dst, dst, mask=contra_mask)
         expand_masked = cv2.bitwise_and(dst, dst, mask=expand_mask)
 
-        contra_masked = cv2.cvtColor(contra_masked, cv2.COLOR_RGB2GRAY)
-        expand_masked = cv2.cvtColor(expand_masked, cv2.COLOR_RGB2GRAY)
-
-        # 마스크 적용
-        target_1 = np.where(contra_masked > 1, 1., 0.)
-        target_2 = np.where(expand_masked > 1, 1., 0.)
-
-        # 타겟 이미지 생성
-        dst = (-target_1 + target_2 + 1.) * 0.5
-        dst = Image.fromarray(dst)
-        dst = transforms.functional.to_tensor(dst)
-        dst = transforms.functional.normalize(dst, (0.5,), (0.5,))
+        # 정상: 0, 내부: 1, 수축: 2, 배경: 3, 팽창: 4
+        inner = (contra_mask > 0).astype(int)  # 내부 마스크: 0, 1
+        inner = np.where((contra_masked > 0).any(axis=-1), 2, inner)  # 0, 1, 2
+        outer = np.where(expand_mask > 0, 3, 0).astype(int)  # 0, 3
+        outer = np.where((expand_masked > 0).any(axis=-1), 4, outer)  # 0, 3, 4
+        dst = inner + outer
+        dst = torch.LongTensor(dst).unsqueeze(0)
 
         # Augmentation 적용
         if self.split == "train":
@@ -203,7 +200,7 @@ class CustomDataset(Dataset):
         conditions = self.conditions[i]
         real_error = self.real_error[i]
 
-        return src, dst, conditions, real_error
+        return src, dst.squeeze(), conditions, real_error
 
     def __len__(self):
 

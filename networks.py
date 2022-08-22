@@ -379,7 +379,7 @@ class UNetGenerator(nn.Module):
         self.dlayer2 = dlayer2
         self.dlayer1 = dlayer1
 
-        self.condition_embedding = ConditionEmbedding(7, 512)
+        self.condition_embedding = ConditionEmbedding(28, 512)
 
     def forward(self, x, cond):
         out1 = self.layer1(x)

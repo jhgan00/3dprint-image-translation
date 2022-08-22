@@ -1,109 +1,206 @@
 import torch
-import torchvision
 from torch import nn
+import torch.nn.functional as F
+import numpy as np
+from typing import Optional
 
 
-class GANLoss(nn.Module):
-    """Define different GAN objectives.
-    The GANLoss class abstracts away the need to create the target label tensor
-    that has the same size as the input.
+def label_to_one_hot_label(
+        labels: torch.Tensor,
+        num_classes: int,
+        device: Optional[torch.device] = None,
+        dtype: Optional[torch.dtype] = None,
+        eps: float = 1e-6,
+        ignore_index=255,
+) -> torch.Tensor:
+    r"""Convert an integer label x-D tensor to a one-hot (x+1)-D tensor.
+
+    Args:
+        labels: tensor with labels of shape :math:`(N, *)`, where N is batch size.
+          Each value is an integer representing correct classification.
+        num_classes: number of classes in labels.
+        device: the desired device of returned tensor.
+        dtype: the desired data type of returned tensor.
+
+    Returns:
+        the labels in one hot tensor of shape :math:`(N, C, *)`,
+
+    Examples:
+        >>> labels = torch.LongTensor([
+                [[0, 1],
+                [2, 0]]
+            ])
+        >>> one_hot(labels, num_classes=3)
+        tensor([[[[1.0000e+00, 1.0000e-06],
+                  [1.0000e-06, 1.0000e+00]],
+
+                 [[1.0000e-06, 1.0000e+00],
+                  [1.0000e-06, 1.0000e-06]],
+
+                 [[1.0000e-06, 1.0000e-06],
+                  [1.0000e+00, 1.0000e-06]]]])
+
+    """
+    shape = labels.shape
+    # one hot : (B, C=ignore_index+1, H, W)
+    one_hot = torch.zeros((shape[0], ignore_index + 1) + shape[1:], device=device, dtype=dtype)
+
+    # labels : (B, H, W)
+    # labels.unsqueeze(1) : (B, C=1, H, W)
+    # one_hot : (B, C=ignore_index+1, H, W)
+    one_hot = one_hot.scatter_(1, labels.unsqueeze(1), 1.0) + eps
+
+    # ret : (B, C=num_classes, H, W)
+    ret = torch.split(one_hot, [num_classes, ignore_index + 1 - num_classes], dim=1)[0]
+
+    return ret
+
+
+# https://github.com/zhezh/focalloss/blob/master/focalloss.py
+def focal_loss(input, target, alpha, gamma, reduction, eps, ignore_index):
+    r"""Criterion that computes Focal loss.
+
+    According to :cite:`lin2018focal`, the Focal loss is computed as follows:
+
+    .. math::
+
+        \text{FL}(p_t) = -\alpha_t (1 - p_t)^{\gamma} \, \text{log}(p_t)
+
+    Where:
+       - :math:`p_t` is the model's estimated probability for each class.
+
+    Args:
+        input: logits tensor with shape :math:`(N, C, *)` where C = number of classes.
+        target: labels tensor with shape :math:`(N, *)` where each value is :math:`0 ≤ targets[i] ≤ C−1`.
+        alpha: Weighting factor :math:`\alpha \in [0, 1]`.
+        gamma: Focusing parameter :math:`\gamma >= 0`.
+        reduction: Specifies the reduction to apply to the
+          output: ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction
+          will be applied, ``'mean'``: the sum of the output will be divided by
+          the number of elements in the output, ``'sum'``: the output will be
+          summed.
+        eps: Scalar to enforce numerical stabiliy.
+
+    Return:
+        the computed loss.
+
+    Example:
+        >>> N = 5  # num_classes
+        >>> input = torch.randn(1, N, 3, 5, requires_grad=True)
+        >>> target = torch.empty(1, 3, 5, dtype=torch.long).random_(N)
+        >>> output = focal_loss(input, target, alpha=0.5, gamma=2.0, reduction='mean')
+        >>> output.backward()
+    """
+    if not isinstance(input, torch.Tensor):
+        raise TypeError(f"Input type is not a torch.Tensor. Got {type(input)}")
+
+    if not len(input.shape) >= 2:
+        raise ValueError(f"Invalid input shape, we expect BxCx*. Got: {input.shape}")
+
+    if input.size(0) != target.size(0):
+        raise ValueError(f'Expected input batch_size ({input.size(0)}) to match target batch_size ({target.size(0)}).')
+
+    # input : (B, C, H, W)
+    n = input.size(0)  # B
+
+    # out_sie : (B, H, W)
+    out_size = (n,) + input.size()[2:]
+
+    # input : (B, C, H, W)
+    # target : (B, H, W)
+    if target.size()[1:] != input.size()[2:]:
+        raise ValueError(f'Expected target size {out_size}, got {target.size()}')
+
+    if not input.device == target.device:
+        raise ValueError(f"input and target must be in the same device. Got: {input.device} and {target.device}")
+
+    if isinstance(alpha, float):
+        pass
+    elif isinstance(alpha, np.ndarray):
+        alpha = torch.from_numpy(alpha)
+        # alpha : (B, C, H, W)
+        alpha = alpha.view(-1, len(alpha), 1, 1).expand_as(input)
+    elif isinstance(alpha, torch.Tensor):
+        # alpha : (B, C, H, W)
+        alpha = alpha.view(-1, len(alpha), 1, 1).expand_as(input)
+
+        # compute softmax over the classes axis
+    # input_soft : (B, C, H, W)
+    input_soft = F.softmax(input, dim=1) + eps
+
+    # create the labels one hot tensor
+    # target_one_hot : (B, C, H, W)
+    target_one_hot = label_to_one_hot_label(target.long(), num_classes=input.shape[1], device=input.device,
+                                            dtype=input.dtype, ignore_index=ignore_index)
+
+    # compute the actual focal loss
+    weight = torch.pow(1.0 - input_soft, gamma)
+
+    # alpha, weight, input_soft : (B, C, H, W)
+    # focal : (B, C, H, W)
+    focal = -alpha * weight * torch.log(input_soft)
+
+    # loss_tmp : (B, H, W)
+    loss_tmp = torch.sum(target_one_hot * focal, dim=1)
+
+    if reduction == 'none':
+        # loss : (B, H, W)
+        loss = loss_tmp
+    elif reduction == 'mean':
+        # loss : scalar
+        loss = torch.mean(loss_tmp)
+    elif reduction == 'sum':
+        # loss : scalar
+        loss = torch.sum(loss_tmp)
+    else:
+        raise NotImplementedError(f"Invalid reduction mode: {reduction}")
+    return loss
+
+
+class FocalLoss(nn.Module):
+    r"""Criterion that computes Focal loss.
+
+    According to :cite:`lin2018focal`, the Focal loss is computed as follows:
+
+    .. math:
+
+        FL(p_t) = -alpha_t(1 - p_t)^{gamma}, log(p_t)
+
+    Where:
+       - :math:`p_t` is the model's estimated probability for each class.
+
+    Args:
+        alpha: Weighting factor :math:`\alpha \in [0, 1]`.
+        gamma: Focusing parameter :math:`\gamma >= 0`.
+        reduction: Specifies the reduction to apply to the
+          output: ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction
+          will be applied, ``'mean'``: the sum of the output will be divided by
+          the number of elements in the output, ``'sum'``: the output will be
+          summed.
+        eps: Scalar to enforce numerical stabiliy.
+
+    Shape:
+        - Input: :math:`(N, C, *)` where C = number of classes.
+        - Target: :math:`(N, *)` where each value is
+          :math:`0 ≤ targets[i] ≤ C−1`.
+
+    Example:
+        >>> N = 5  # num_classes
+        >>> kwargs = {"alpha": 0.5, "gamma": 2.0, "reduction": 'mean'}
+        >>> criterion = FocalLoss(**kwargs)
+        >>> input = torch.randn(1, N, 3, 5, requires_grad=True)
+        >>> target = torch.empty(1, 3, 5, dtype=torch.long).random_(N)
+        >>> output = criterion(input, target)
+        >>> output.backward()
     """
 
-    def __init__(self, gan_mode, target_real_label=1.0, target_fake_label=0.0):
-        """ Initialize the GANLoss class.
-        Parameters:
-            gan_mode (str) - - the type of GAN objective. It currently supports vanilla, lsgan, and wgangp.
-            target_real_label (bool) - - label for a real image
-            target_fake_label (bool) - - label of a fake image
-        Note: Do not use sigmoid as the last layer of Discriminator.
-        LSGAN needs no sigmoid. vanilla GANs will handle it with BCEWithLogitsLoss.
-        """
-        super(GANLoss, self).__init__()
-        self.register_buffer('real_label', torch.tensor(target_real_label))
-        self.register_buffer('fake_label', torch.tensor(target_fake_label))
-        self.gan_mode = gan_mode
-        if gan_mode == 'lsgan':
-            self.loss = nn.MSELoss()
-        elif gan_mode == 'vanilla':
-            self.loss = nn.BCEWithLogitsLoss()
-        elif gan_mode in ['wgangp']:
-            self.loss = None
-        else:
-            raise NotImplementedError('gan mode %s not implemented' % gan_mode)
+    def __init__(self, alpha, gamma=2.0, reduction='mean', eps=1e-8, ignore_index=30):
+        super().__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        self.reduction = reduction
+        self.eps = eps
+        self.ignore_index = ignore_index
 
-    def get_target_tensor(self, prediction, target_is_real):
-        """Create label tensors with the same size as the input.
-        Parameters:
-            prediction (tensor) - - tpyically the prediction from a discriminator
-            target_is_real (bool) - - if the ground truth label is for real images or fake images
-        Returns:
-            A label tensor filled with ground truth label, and with the size of the input
-        """
-
-        if target_is_real:
-            target_tensor = self.real_label
-        else:
-            target_tensor = self.fake_label
-        return target_tensor.expand_as(prediction)
-
-    def forward(self, prediction, target_is_real):
-        """Calculate loss given Discriminator's output and grount truth labels.
-        Parameters:
-            prediction (tensor) - - tpyically the prediction output from a discriminator
-            target_is_real (bool) - - if the ground truth label is for real images or fake images
-        Returns:
-            the calculated loss.
-        """
-        if self.gan_mode in ['lsgan', 'vanilla']:
-            target_tensor = self.get_target_tensor(prediction, target_is_real)
-            loss = self.loss(prediction, target_tensor)
-        elif self.gan_mode == 'wgangp':
-            if target_is_real:
-                loss = -prediction.mean()
-            else:
-                loss = prediction.mean()
-        return loss
-
-
-class VGGPerceptualLoss(torch.nn.Module):
-    def __init__(self, resize=True):
-        super(VGGPerceptualLoss, self).__init__()
-        blocks = []
-        blocks.append(torchvision.models.vgg16(pretrained=True).features[:4].eval())
-        blocks.append(torchvision.models.vgg16(pretrained=True).features[4:9].eval())
-        blocks.append(torchvision.models.vgg16(pretrained=True).features[9:16].eval())
-        blocks.append(torchvision.models.vgg16(pretrained=True).features[16:23].eval())
-        for bl in blocks:
-            for p in bl.parameters():
-                p.requires_grad = False
-        self.blocks = torch.nn.ModuleList(blocks)
-        # self.transform = torch.nn.functional.interpolate
-        # self.resize = resize
-        # self.register_buffer("mean", torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
-        # self.register_buffer("std", torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
-
-    def forward(self, input, target, feature_layers=[0, 1, 2, 3], style_layers=[]):
-        # convert to RGB space if input is a grayscale image
-        if input.shape[1] != 3:
-            input = input.repeat(1, 3, 1, 1)
-            target = target.repeat(1, 3, 1, 1)
-        # input = (input-self.mean) / self.std
-        # target = (target-self.mean) / self.std
-        # if self.resize:
-        #     input = self.transform(input, mode='bilinear', size=(224, 224), align_corners=False)
-        #     target = self.transform(target, mode='bilinear', size=(224, 224), align_corners=False)
-        loss = 0.0
-        x = input
-        y = target
-        for i, block in enumerate(self.blocks):
-            x = block(x)
-            y = block(y)
-            if i in feature_layers:
-                loss += torch.nn.functional.l1_loss(x, y)
-            if i in style_layers:
-                act_x = x.reshape(x.shape[0], x.shape[1], -1)
-                act_y = y.reshape(y.shape[0], y.shape[1], -1)
-                gram_x = act_x @ act_x.permute(0, 2, 1)
-                gram_y = act_y @ act_y.permute(0, 2, 1)
-                loss += torch.nn.functional.l1_loss(gram_x, gram_y)
-        return loss
+    def forward(self, input, target):
+        return focal_loss(input, target, self.alpha, self.gamma, self.reduction, self.eps, self.ignore_index)
