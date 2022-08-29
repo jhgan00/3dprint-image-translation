@@ -5,8 +5,8 @@ from sklearn.metrics import classification_report
 from skimage.color import label2rgb
 from torchvision.utils import make_grid, save_image
 
-LABELS = [0, 1, 2, 3, 4]
-TARGET_NAMES = 'Normal Inner Contraction Outer Expansion'.split()
+LABELS = [0, 1, 2, 3]
+TARGET_NAMES = 'Background Normal Contraction Expansion'.split()
 LABEL_DICT = {k: v for k, v in zip(LABELS, TARGET_NAMES)}
 
 
@@ -61,11 +61,11 @@ def train_one_epoch(
         if not (iter % args.display_freq):
 
             dst = dst.detach().cpu().numpy()
-            dst_rgb = torch.FloatTensor([label2rgb(x, colors=['white', 'blue', 'gray', 'red'], bg_label=0, bg_color='black') for x in dst])
+            dst_rgb = torch.FloatTensor([label2rgb(x, colors=['green', 'blue', 'red'], bg_label=0, bg_color='black') for x in dst])
             dst_rgb = dst_rgb.permute(0, 3, 1, 2)
 
             pred = pred.argmax(1).detach().cpu().numpy()
-            pred_rgb = torch.FloatTensor([label2rgb(x, colors=['white', 'blue', 'gray', 'red'], bg_label=0, bg_color='black') for x in pred])
+            pred_rgb = torch.FloatTensor([label2rgb(x, colors=['green', 'blue', 'red'], bg_label=0, bg_color='black') for x in pred])
             pred_rgb = pred_rgb.permute(0, 3, 1, 2)
 
             log_writer.add_image('images/src', make_grid(src, value_range=(-1, 1), normalize=True, nrow=2), global_step)
@@ -90,22 +90,10 @@ def evaluate(G: torch.nn.Module, data_loader: torch.utils.data.DataLoader, epoch
         cond = cond.to(device).float()
         pred = G(src, cond)
 
-        dsts.append(dst)
-        preds.append(pred)
+        dsts += dst.detach().cpu().numpy().flatten().tolist()
+        preds += pred.argmax(1).detach().cpu().numpy().flatten().tolist()
 
-    dsts = torch.cat(dsts).detach().cpu().numpy()
-    preds = torch.cat(preds).argmax(1).detach().cpu().numpy()
-    dsts_rgb = torch.FloatTensor([
-        label2rgb(x, colors=['white', 'blue', 'gray', 'red'], bg_label=0, bg_color='black') for x in dsts
-    ])
-    dsts_rgb = dsts_rgb.permute(0, 3, 1, 2)
-
-    preds_rgb = torch.FloatTensor([
-        label2rgb(x, colors=['white', 'blue', 'gray', 'red'], bg_label=0, bg_color='black') for x in preds
-    ])
-    preds_rgb = preds_rgb.permute(0, 3, 1, 2)
-
-    result_dict = classification_report(dsts.flatten(), preds.flatten(), labels=LABELS, target_names=TARGET_NAMES, output_dict=True, zero_division=0.)
+    result_dict = classification_report(dsts, preds, labels=LABELS, target_names=TARGET_NAMES, output_dict=True, zero_division=0.)
     header_format = "{:15} | {:15} | {:15} | {:15}"
     header = header_format.format("Label", "Precision", "Recall", "F1-score")
     print(header)
@@ -120,31 +108,26 @@ def evaluate(G: torch.nn.Module, data_loader: torch.utils.data.DataLoader, epoch
         log_writer.add_scalar(f"F1-score/{target}", result['f1-score'], global_step=epoch)
 
     print("=" * 80)
-    log_writer.add_image('Test/True', make_grid(dsts_rgb, nrow=2), epoch)
-    log_writer.add_image('Test/Prediction', make_grid(preds_rgb, nrow=2), epoch)
 
     return result_dict
 
 
 @torch.no_grad()
-def generate(G: torch.nn.Module, data_loader: torch.utils.data.DataLoader, epoch: int, device: torch.device,
-             save_images: bool, log_writer, args):
+def generate(G: torch.nn.Module, data_loader: torch.utils.data.DataLoader, device: torch.device, args):
     G.eval()
     pred_images = []
     for src, _, cond, src_error in data_loader:
         src = src.to(device)
         cond = cond.to(device)
-        pred = G(src, cond)
-        pred_images.append(pred.detach())
-    pred_images = torch.cat(pred_images)
+        pred = G(src, cond).detach().cpu()
+        pred_rgb = torch.FloatTensor([
+            label2rgb(x, colors=['white', 'blue', 'gray', 'red'], bg_label=0, bg_color='black') for x in pred
+        ])
+        pred_rgb = pred_rgb.permute(0, 3, 1, 2)
+        pred_images.append(pred_rgb)
 
-    if log_writer is not None:
-        log_writer.add_image('images/test_gen', make_grid(pred_images, nrow=2, value_range=(-1, 1), normalize=True), epoch)
-
-    if save_images:
-        pred_images = (pred_images + 1.0) * 0.5  # (-1, 1) -> (0, 1)
-        for org_filename, pred_img in zip(data_loader.dataset.src_images, pred_images):
-            save_path = os.path.join(args.output_dir, os.path.basename(org_filename))
-            save_image(pred_img, save_path)
+    for org_filename, pred_img in zip(data_loader.dataset.dst_images, pred_images):
+        save_path = os.path.join(args.output_dir, os.path.basename(org_filename))
+        save_image(pred_img, save_path)
 
     return pred_images
