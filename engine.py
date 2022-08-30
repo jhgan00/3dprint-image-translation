@@ -4,6 +4,7 @@ import torch
 from torchvision.utils import make_grid, save_image
 
 from metric import mean_pixel_loss
+from pytorch_fid.fid_score import calculate_fid_given_paths
 
 
 def set_requires_grad(nets, requires_grad=False):
@@ -56,8 +57,7 @@ def train_one_epoch(G: torch.nn.Module, D: torch.nn.Module, optimG: torch.nn.Mod
             pred_fake = D(fake_AB, cond, G.condition_embedding.embeddings)
             loss_G_GAN = adv_loss(pred_fake, True)
             loss_G_VGG = vgg_loss(fake_B, real_B) * args.lambda_VGG
-            loss_G_L1  = l1_loss(fake_B, real_B) * args.lambda_L1
-            loss_G = loss_G_GAN + loss_G_VGG + loss_G_L1
+            loss_G = loss_G_GAN + loss_G_VGG
         loss_G.backward()
         optimG.step()  # udpate G's weights
 
@@ -66,17 +66,15 @@ def train_one_epoch(G: torch.nn.Module, D: torch.nn.Module, optimG: torch.nn.Mod
         if not (iter % args.log_freq) or (iter == len(train_loader)):
             loss_G_adv = loss_G_GAN.item()
             loss_G_vgg = loss_G_VGG.item()
-            loss_G_l1  = loss_G_L1.item()
             loss_D_real = loss_D_real.item()
             loss_D_fake = loss_D_fake.item()
 
             print(f"Epoch [{epoch}/{args.total_epochs}] Batch [{iter}/{len(train_loader)}] "
-                  f"G_adv: {loss_G_adv:.4f} G_vgg: {loss_G_vgg:.4f} G_l1: {loss_G_l1:.4f} "
+                  f"G_adv: {loss_G_adv:.4f} G_vgg: {loss_G_vgg:.4f} "
                   f"D_real: {loss_D_real:.4f} D_fake: {loss_D_fake:.4f} ")
 
             log_writer.add_scalar('G/adversarial', loss_G_adv, global_step)
             log_writer.add_scalar('G/vgg', loss_G_vgg, global_step)
-            log_writer.add_scalar('G/l1', loss_G_l1, global_step)
             log_writer.add_scalar('G/lr', optimG.param_groups[0]['lr'], global_step)
 
             log_writer.add_scalar('D/real', loss_D_real, global_step)
@@ -110,29 +108,38 @@ def evaluate(G: torch.nn.Module, data_loader: torch.utils.data.DataLoader, epoch
         fake_images.append(fake.detach().cpu())
         real_errors.append(real_error.float().detach())
 
-    real_images = torch.cat(real_images)
-    fake_images = torch.cat(fake_images)
+    # real_images = torch.cat(real_images)
+    # fake_images = torch.cat(fake_images)
 
-    log_writer.add_image('images/test_gen', make_grid(fake_images, nrow=2, value_range=(-1, 1), normalize=True), epoch)
+    # log_writer.add_image('images/test_gen', make_grid(fake_images, nrow=2, value_range=(-1, 1), normalize=True), epoch)
 
-    real_images = (real_images * 0.5) + 0.5  # (-1, 1) -> (0, 1)
-    fake_images = (fake_images * 0.5) + 0.5  # (-1, 1) -> (0, 1)
+    # real_images = (real_images * 0.5) + 0.5  # (-1, 1) -> (0, 1)
+    # fake_images = (fake_images * 0.5) + 0.5  # (-1, 1) -> (0, 1)
 
     for org_filename, fake_img in zip(data_loader.dataset.dataset.dst_images, fake_images):
         save_path = os.path.join(args.output_dir, "fake", os.path.basename(org_filename))
-        save_image(fake_img, save_path)
+        save_image(fake_img * 0.5 + 0.5, save_path)
 
     for org_filename, real_img in zip(data_loader.dataset.dataset.dst_images, real_images):
         save_path = os.path.join(args.output_dir, "real", os.path.basename(org_filename))
-        save_image(real_img, save_path)
+        save_image(real_img * 0.5 + 0.5, save_path)
 
-    real_images = real_images * 255
-    fake_images = fake_images * 255
+    fid_value = calculate_fid_given_paths([
+        os.path.join(args.output_dir, "real"), os.path.join(args.output_dir, "fake")],
+        args.batch_size,
+        device,
+        2048,
+        args.num_threads
+    )
 
-    l1_pix_loss = mean_pixel_loss(fake_images.squeeze(), real_images.squeeze())
-    log_writer.add_scalar('test/Pixel Loss', l1_pix_loss, global_step=epoch)
-
-    return None
+    # real_images = real_images * 255
+    # fake_images = fake_images * 255
+    #
+    # l1_pix_loss = mean_pixel_loss(fake_images.squeeze(), real_images.squeeze())
+    log_writer.add_scalar('Test/FID', fid_value, global_step=epoch)
+    print(f"FID: {fid_value:.2f}")
+    #
+    return fid_value
 
 
 @torch.no_grad()

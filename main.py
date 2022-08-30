@@ -20,10 +20,9 @@ def get_args():
 
     parser.add_argument('--gan_mode', type=str, default='lsgan',
                         help='the type of GAN objective. [vanilla| lsgan | wgangp]. vanilla GAN loss is the cross-entropy objective used in the original GAN paper.')
-    parser.add_argument('--lambda_L1', type=float, default=0.)
     parser.add_argument('--lambda_VGG', type=float, default=100.,
                         help='weight for the content(VGG) loss (originally proposed in SRGAN)')
-    parser.add_argument('--smoothing', type=float, default=0.2)
+    parser.add_argument('--smoothing', type=float, default=0.1)
 
     # model parameters
     parser.add_argument('--netG', type=str, default='resnet', choices=['unet', 'resnet'])
@@ -49,12 +48,11 @@ def get_args():
     parser.add_argument('--csv_fpath', type=str, default='./data/Metadata/data.csv')
     parser.add_argument('--use_validset', action="store_true")
 
-    parser.add_argument('--num_threads', default=2, type=int, help='# threads for loading data')
-    parser.add_argument('--batch_size', type=int, default=2, help='input batch size')
-    parser.add_argument('--input_size', type=int, default=512, help='scale images to this size')
+    parser.add_argument('--num_threads', default=4, type=int, help='# threads for loading data')
+    parser.add_argument('--batch_size', type=int, default=1, help='input batch size')
 
     # training parameters
-    parser.add_argument('--n_epochs', type=int, default=100, help='number of epochs with the initial learning rate')
+    parser.add_argument('--n_epochs', type=int, default=50, help='number of epochs with the initial learning rate')
     parser.add_argument('--n_epochs_decay', type=int, default=100,
                         help='number of epochs with the initial learning rate')
     parser.add_argument('--beta1', type=float, default=0.5, help='momentum term of adam')
@@ -62,9 +60,9 @@ def get_args():
     parser.add_argument('--lr_decay_iters', type=int, default=25)
 
     # misc
-    parser.add_argument('--device', type=str, default='cuda:1')
+    parser.add_argument('--device', type=str, default='cuda:2')
     parser.add_argument('--checkpoints_dir', type=str, default='./checkpoints', help='models are saved here')
-    parser.add_argument('--log_dir', type=str, default='./logs')
+    parser.add_argument('--log_dir', type=str, default='./logs/translation')
     parser.add_argument('--output_dir', type=str, default='./outputs')
     parser.add_argument('--log_freq', type=int, default=10)
     parser.add_argument('--display_freq', type=int, default=10)
@@ -109,7 +107,7 @@ def main(args):
     criterionVGG = VGGPerceptualLoss().to(device)
 
     # get dataset
-    train_dataset = CustomDataset(args.src_dir, args.dst_dir, args.csv_fpath, split="train")
+    train_dataset = CustomDataset(args.dst_dir, args.csv_fpath, split="train")
     train_size = int(0.8 * len(train_dataset))
     test_size = len(train_dataset) - train_size
     train_dataset, test_dataset = torch.utils.data.random_split(train_dataset, [train_size, test_size])
@@ -167,14 +165,14 @@ def main(args):
         evaluate(netG, test_loader, epoch, device, log_writer, args)
         # generate(netG, test_loader, epoch, device, save_images=False, log_writer=log_writer, args=args)
 
-        # if not epoch % args.ckpt_freq:
-        #     save_path = os.path.join(args.checkpoints_dir, f'checkpoint-{epoch}.pth')
-        #     torch.save(netG.state_dict(), save_path)
-        #     generate(netG, test_loader, epoch, device, save_images=False, log_writer=log_writer, args=args)
+        if not epoch % args.ckpt_freq:
+            save_path = os.path.join(args.checkpoints_dir, f'checkpoint-{epoch}.pth')
+            torch.save(netG.state_dict(), save_path)
+            # generate(netG, test_loader, epoch, device, save_images=False, log_writer=log_writer, args=args)
 
     save_path = os.path.join(args.checkpoints_dir, 'checkpoint-final.pth')
     torch.save(netG.state_dict(), save_path)
-    generate(netG, test_loader, args.total_epochs + args.ckpt_freq, device, save_images=True, log_writer=None, args=args)
+    # generate(netG, test_loader, args.total_epochs + args.ckpt_freq, device, save_images=True, log_writer=None, args=args)
 
 
 if __name__ == "__main__":
