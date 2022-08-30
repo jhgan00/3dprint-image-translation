@@ -115,19 +115,33 @@ def evaluate(G: torch.nn.Module, data_loader: torch.utils.data.DataLoader, epoch
 @torch.no_grad()
 def generate(G: torch.nn.Module, data_loader: torch.utils.data.DataLoader, device: torch.device, args):
     G.eval()
+    real_images = []
     pred_images = []
-    for src, _, cond, src_error in data_loader:
+    for src, dst, cond, src_error in data_loader:
+
         src = src.to(device)
-        cond = cond.to(device)
+        cond = cond.to(device).float()
         pred = G(src, cond).detach().cpu()
-        pred_rgb = torch.FloatTensor([
-            label2rgb(x, colors=['white', 'blue', 'gray', 'red'], bg_label=0, bg_color='black') for x in pred
-        ])
+
+        dst = dst.detach().cpu().numpy()
+        dst_rgb = torch.FloatTensor(
+            [label2rgb(x, colors=['green', 'blue', 'red'], bg_label=0, bg_color='black') for x in dst])
+        dst_rgb = dst_rgb.permute(0, 3, 1, 2)
+
+        pred = pred.argmax(1).detach().cpu().numpy()
+        pred_rgb = torch.FloatTensor(
+            [label2rgb(x, colors=['green', 'blue', 'red'], bg_label=0, bg_color='black') for x in pred])
         pred_rgb = pred_rgb.permute(0, 3, 1, 2)
+
+        real_images.append(dst_rgb)
         pred_images.append(pred_rgb)
 
-    for org_filename, pred_img in zip(data_loader.dataset.dst_images, pred_images):
-        save_path = os.path.join(args.output_dir, os.path.basename(org_filename))
+    for org_filename, real_img in zip(data_loader.dataset.dataset.dst_images, real_images):
+        save_path = os.path.join(args.output_dir, "real", os.path.basename(org_filename))
+        save_image(real_img, save_path)
+
+    for org_filename, pred_img in zip(data_loader.dataset.dataset.dst_images, pred_images):
+        save_path = os.path.join(args.output_dir, "pred", os.path.basename(org_filename))
         save_image(pred_img, save_path)
 
     return pred_images
