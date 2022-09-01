@@ -1,9 +1,7 @@
 import os
-
+import random
 import torch
 from torchvision.utils import make_grid, save_image
-
-from metric import mean_pixel_loss
 from pytorch_fid.fid_score import calculate_fid_given_paths
 
 
@@ -18,7 +16,7 @@ def set_requires_grad(nets, requires_grad=False):
 
 def train_one_epoch(G: torch.nn.Module, D: torch.nn.Module, optimG: torch.nn.Module, optimD: torch.nn.Module,
                     schedG, schedD,
-                    adv_loss, l1_loss, vgg_loss, train_loader: torch.utils.data.DataLoader, epoch: int,
+                    adv_loss, vgg_loss, train_loader: torch.utils.data.DataLoader, epoch: int,
                     device: torch.device, log_writer: torch.utils.tensorboard.SummaryWriter, args):
 
     G.train()
@@ -30,8 +28,8 @@ def train_one_epoch(G: torch.nn.Module, D: torch.nn.Module, optimG: torch.nn.Mod
 
     for iter, (real_A, real_B, cond, _) in enumerate(train_loader, 1):
 
-        real_A = real_A.to(device)
-        real_B = real_B.to(device)
+        real_A = real_A.to(device).float()
+        real_B = real_B.to(device).float()
         cond = cond.to(device).float()
 
         with torch.cuda.amp.autocast():
@@ -100,7 +98,7 @@ def evaluate(G: torch.nn.Module, data_loader: torch.utils.data.DataLoader, epoch
     real_errors = []
 
     for src, dst, cond, real_error in data_loader:
-        src = src.to(device)
+        src = src.to(device).float()
         cond = cond.to(device).float()
         fake = G(src, cond)
 
@@ -108,19 +106,15 @@ def evaluate(G: torch.nn.Module, data_loader: torch.utils.data.DataLoader, epoch
         fake_images.append(fake.detach().cpu())
         real_errors.append(real_error.float().detach())
 
-    # real_images = torch.cat(real_images)
-    # fake_images = torch.cat(fake_images)
+    i = random.randint(1, len(real_images))
+    log_writer.add_image(f'test/real', make_grid(real_images[i], nrow=1, value_range=(-1, 1), normalize=True), epoch)
+    log_writer.add_image(f'test/fake', make_grid(fake_images[i], nrow=1, value_range=(-1, 1), normalize=True), epoch)
 
-    # log_writer.add_image('images/test_gen', make_grid(fake_images, nrow=2, value_range=(-1, 1), normalize=True), epoch)
-
-    # real_images = (real_images * 0.5) + 0.5  # (-1, 1) -> (0, 1)
-    # fake_images = (fake_images * 0.5) + 0.5  # (-1, 1) -> (0, 1)
-
-    for org_filename, fake_img in zip(data_loader.dataset.dataset.dst_images, fake_images):
+    for org_filename, fake_img in zip(data_loader.dataset.dst_images, fake_images):
         save_path = os.path.join(args.output_dir, "fake", os.path.basename(org_filename))
         save_image(fake_img * 0.5 + 0.5, save_path)
 
-    for org_filename, real_img in zip(data_loader.dataset.dataset.dst_images, real_images):
+    for org_filename, real_img in zip(data_loader.dataset.dst_images, real_images):
         save_path = os.path.join(args.output_dir, "real", os.path.basename(org_filename))
         save_image(real_img * 0.5 + 0.5, save_path)
 
@@ -132,13 +126,8 @@ def evaluate(G: torch.nn.Module, data_loader: torch.utils.data.DataLoader, epoch
         args.num_threads
     )
 
-    # real_images = real_images * 255
-    # fake_images = fake_images * 255
-    #
-    # l1_pix_loss = mean_pixel_loss(fake_images.squeeze(), real_images.squeeze())
     log_writer.add_scalar('Test/FID', fid_value, global_step=epoch)
     print(f"FID: {fid_value:.2f}")
-    #
     return fid_value
 
 

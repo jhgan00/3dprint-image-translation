@@ -9,7 +9,7 @@ from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-from dataset import CustomDataset
+from dataset import get_dataset
 from engine import train_one_epoch, evaluate, generate
 from losses import GANLoss, VGGPerceptualLoss
 from networks import ResnetGenerator, UNetGenerator, NLayerDiscriminator, init_weights, get_norm_layer
@@ -42,14 +42,13 @@ def get_args():
                         help='scaling factor for normal, xavier and orthogonal.')
 
     # dataset parameters
-    # 1% 데이터셋 경로
-    parser.add_argument('--src_dir', type=str, default='./data/Blueprint')
-    parser.add_argument('--dst_dir', type=str, default='./data/Mash')
-    parser.add_argument('--csv_fpath', type=str, default='./data/Metadata/data.csv')
-    parser.add_argument('--use_validset', action="store_true")
-
+    parser.add_argument('--dataset', type=str, default='tdp-color', choices=['tdp-color', 'tdp-gray', 'hdjoong'])
+    parser.add_argument('--src_dir', type=str, default='./data/data/Blueprint')
+    parser.add_argument('--dst_dir', type=str, default='./data/data/Mash')
+    parser.add_argument('--csv_fpath', type=str, default='./data/data/Metadata/data.csv')
     parser.add_argument('--num_threads', default=4, type=int, help='# threads for loading data')
     parser.add_argument('--batch_size', type=int, default=1, help='input batch size')
+    parser.add_argument('--input-size', type=int, default=[], nargs="+", help='input size. empty for no resizing')
 
     # training parameters
     parser.add_argument('--n_epochs', type=int, default=50, help='number of epochs with the initial learning rate')
@@ -61,7 +60,7 @@ def get_args():
 
     # misc
     parser.add_argument('--device', type=str, default='cuda:2')
-    parser.add_argument('--checkpoints_dir', type=str, default='./checkpoints', help='models are saved here')
+    parser.add_argument('--checkpoint_dir', type=str, default='./checkpoints', help='models are saved here')
     parser.add_argument('--log_dir', type=str, default='./logs/translation')
     parser.add_argument('--output_dir', type=str, default='./outputs')
     parser.add_argument('--log_freq', type=int, default=10)
@@ -73,10 +72,10 @@ def get_args():
     args = parser.parse_args()
     args.log_dir = os.path.join(args.log_dir, args.expr_name)
     args.output_dir = os.path.join(args.output_dir, args.expr_name)
-    args.checkpoints_dir = os.path.join(args.checkpoints_dir, args.expr_name)
+    args.checkpoint_dir = os.path.join(args.checkpoint_dir, args.expr_name)
 
-    if not os.path.exists(args.checkpoints_dir):
-        os.makedirs(args.checkpoints_dir)
+    if not os.path.exists(args.checkpoint_dir):
+        os.makedirs(args.checkpoint_dir)
     if not os.path.exists(os.path.join(args.output_dir, "real")):
         os.makedirs(os.path.join(args.output_dir, "real"))
     if not os.path.exists(os.path.join(args.output_dir, "fake")):
@@ -103,22 +102,20 @@ def main(args):
     random.seed(args.seed)
 
     criterionGAN = GANLoss(args.gan_mode, target_real_label=1 - args.smoothing, target_fake_label=args.smoothing).to(device)
-    criterionL1  = torch.nn.L1Loss()
     criterionVGG = VGGPerceptualLoss().to(device)
 
     # get dataset
-    train_dataset = CustomDataset(args.dst_dir, args.csv_fpath, split="train")
-    train_size = int(0.8 * len(train_dataset))
-    test_size = len(train_dataset) - train_size
-    train_dataset, test_dataset = torch.utils.data.random_split(train_dataset, [train_size, test_size])
+    train_dataset, valid_dataset, test_dataset = get_dataset(args)
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, pin_memory=True,
                               num_workers=args.num_threads)
+    valid_loader = DataLoader(valid_dataset, batch_size=args.batch_size, shuffle=False, pin_memory=True,
+                             num_workers=args.num_threads)
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, pin_memory=True,
                              num_workers=args.num_threads)
 
     # get model
-    num_embeddings = train_dataset.dataset.conditions.shape[1]
+    num_embeddings = train_dataset.conditions.shape[1]
     use_dropout = not args.no_dropout
     if args.netG == 'unet':
         netG = UNetGenerator(output_nc=args.output_nc, input_nc=args.input_nc, norm_type=args.norm_type).to(device)
@@ -153,7 +150,6 @@ def main(args):
             scheduler_G,
             scheduler_D,
             criterionGAN,
-            criterionL1,
             criterionVGG,
             train_loader,
             epoch,
@@ -162,17 +158,13 @@ def main(args):
             args
         )
 
-        evaluate(netG, test_loader, epoch, device, log_writer, args)
-        # generate(netG, test_loader, epoch, device, save_images=False, log_writer=log_writer, args=args)
+        evaluate(netG, valid_loader, epoch, device, log_writer, args)
 
         if not epoch % args.ckpt_freq:
             save_path = os.path.join(args.checkpoints_dir, f'checkpoint-{epoch}.pth')
             torch.save(netG.state_dict(), save_path)
-            # generate(netG, test_loader, epoch, device, save_images=False, log_writer=log_writer, args=args)
 
-    save_path = os.path.join(args.checkpoints_dir, 'checkpoint-final.pth')
-    torch.save(netG.state_dict(), save_path)
-    # generate(netG, test_loader, args.total_epochs + args.ckpt_freq, device, save_images=True, log_writer=None, args=args)
+    evaluate(netG, test_loader, args.n_epoch, device, log_writer, args)
 
 
 if __name__ == "__main__":
