@@ -161,10 +161,10 @@ def main(args):
         evaluate(netG, valid_loader, epoch, device, log_writer, args)
 
         if not epoch % args.ckpt_freq:
-            save_path = os.path.join(args.checkpoints_dir, f'checkpoint-{epoch}.pth')
+            save_path = os.path.join(args.checkpoint_dir, f'checkpoint-{epoch}.pth')
             torch.save(netG.state_dict(), save_path)
 
-    evaluate(netG, test_loader, args.n_epoch, device, log_writer, args)
+    evaluate(netG, test_loader, args.n_epochs, device, log_writer, args)
 
 
 if __name__ == "__main__":

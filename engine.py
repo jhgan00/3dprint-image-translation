@@ -106,7 +106,7 @@ def evaluate(G: torch.nn.Module, data_loader: torch.utils.data.DataLoader, epoch
         fake_images.append(fake.detach().cpu())
         real_errors.append(real_error.float().detach())
 
-    i = random.randint(1, len(real_images))
+    i = random.randint(0, len(real_images) - 1)
     log_writer.add_image(f'test/real', make_grid(real_images[i], nrow=1, value_range=(-1, 1), normalize=True), epoch)
     log_writer.add_image(f'test/fake', make_grid(fake_images[i], nrow=1, value_range=(-1, 1), normalize=True), epoch)
 
