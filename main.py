@@ -9,7 +9,7 @@ from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-from dataset import CustomDataset
+from dataset import get_dataset
 from engine import train_one_epoch, evaluate, generate
 from networks import ResnetGenerator, UNetGenerator, init_weights, get_norm_layer
 from losses import FocalLoss
@@ -39,27 +39,25 @@ def get_args():
     parser.add_argument('--gamma', type=float, default=2.)
 
     # dataset parameters
-    # 1% 데이터셋 경로
-    parser.add_argument('--src_dir', type=str, default='./data/Blueprint')
-    parser.add_argument('--dst_dir', type=str, default='./data/Mash')
-    parser.add_argument('--csv_fpath', type=str, default='./data/Metadata/data.csv')
-    parser.add_argument('--use_validset', action="store_true")
-
-    parser.add_argument('--num_threads', default=2, type=int, help='# threads for loading data')
+    parser.add_argument('--src_dir', type=str, default='./data/data/Blueprint')
+    parser.add_argument('--dst_dir', type=str, default='./data/data/Mash')
+    parser.add_argument('--csv_fpath', type=str, default='./data/data/Metadata/data.csv')
+    parser.add_argument('--num_threads', default=4, type=int, help='# threads for loading data')
     parser.add_argument('--batch_size', type=int, default=1, help='input batch size')
+    parser.add_argument('--input-size', type=int, default=[], nargs="+", help='input size. empty for no resizing')
 
     # training parameters
-    parser.add_argument('--n_epochs', type=int, default=50, help='number of epochs with the initial learning rate')
-    parser.add_argument('--n_epochs_decay', type=int, default=100,
+    parser.add_argument('--n_epochs', type=int, default=1, help='number of epochs with the initial learning rate')
+    parser.add_argument('--n_epochs_decay', type=int, default=1,
                         help='number of epochs with the initial learning rate')
     parser.add_argument('--lr', type=float, default=1e-4, help='initial learning rate for adam')
     parser.add_argument('--lr_decay_iters', type=int, default=25)
 
     # misc
-    parser.add_argument('--device', type=str, default='cuda:1')
-    parser.add_argument('--checkpoints_dir', type=str, default='./checkpoints', help='models are saved here')
-    parser.add_argument('--log_dir', type=str, default='./logs')
-    parser.add_argument('--output_dir', type=str, default='./outputs')
+    parser.add_argument('--device', type=str, default='cuda:0')
+    parser.add_argument('--checkpoint_dir', type=str, default='./experiments/segmentation/checkpoints', help='models are saved here')
+    parser.add_argument('--log_dir', type=str, default='./experiments/segmentation/logs')
+    parser.add_argument('--output_dir', type=str, default='./experiments/segmentation/outputs')
     parser.add_argument('--log_freq', type=int, default=10)
     parser.add_argument('--display_freq', type=int, default=10)
     parser.add_argument('--eval_freq', type=int, default=10)
@@ -71,14 +69,14 @@ def get_args():
     # args.expr_name = f"alpha-{args.alpha}-gamma-{args.gamma}"
     args.log_dir = os.path.join(args.log_dir, args.expr_name)
     args.output_dir = os.path.join(args.output_dir, args.expr_name)
-    args.checkpoints_dir = os.path.join(args.checkpoints_dir, args.expr_name)
+    args.checkpoint_dir = os.path.join(args.checkpoint_dir, args.expr_name)
 
-    if not os.path.exists(args.checkpoints_dir):
-        os.makedirs(args.checkpoints_dir)
+    if not os.path.exists(args.checkpoint_dir):
+        os.makedirs(args.checkpoint_dir)
     if not os.path.exists(os.path.join(args.output_dir, "real")):
         os.makedirs(os.path.join(args.output_dir, "real"))
-    if not os.path.exists(os.path.join(args.output_dir, "fake")):
-        os.makedirs(os.path.join(args.output_dir, "fake"))
+    if not os.path.exists(os.path.join(args.output_dir, "pred")):
+        os.makedirs(os.path.join(args.output_dir, "pred"))
     args.total_epochs = args.n_epochs + args.n_epochs_decay
     return args
 
@@ -107,18 +105,17 @@ def main(args):
         criterion = FocalLoss(alpha=alpha, gamma=args.gamma)
 
     # get dataset
-    train_dataset = CustomDataset(args.dst_dir, args.csv_fpath, split="train")
-    train_size = int(0.8 * len(train_dataset))
-    test_size = len(train_dataset) - train_size
-    train_dataset, test_dataset = torch.utils.data.random_split(train_dataset, [train_size, test_size])
+    train_dataset, valid_dataset, test_dataset = get_dataset(args)
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, pin_memory=True,
                               num_workers=args.num_threads)
+    valid_loader = DataLoader(valid_dataset, batch_size=args.batch_size, shuffle=False, pin_memory=True,
+                             num_workers=args.num_threads)
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, pin_memory=True,
                              num_workers=args.num_threads)
 
     # get model
-    num_embeddings = train_dataset.dataset.conditions.shape[1]
+    num_embeddings = train_dataset.conditions.shape[1]
     use_dropout = not args.no_dropout
     if args.netG == 'unet':
         netG = UNetGenerator(output_nc=args.output_nc, input_nc=args.input_nc, norm_type=args.norm_type).to(device)
@@ -154,7 +151,7 @@ def main(args):
 
         if not (epoch % args.eval_freq):
 
-            eval_result = evaluate(netG, test_loader, epoch, device, log_writer, args)
+            eval_result = evaluate(netG, valid_loader, epoch, device, log_writer, args)
             f1_score = eval_result['macro avg']['f1-score']
 
             if f1_score >= best_score:

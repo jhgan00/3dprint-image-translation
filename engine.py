@@ -1,14 +1,14 @@
 import os
-
+import random
 import torch
 from sklearn.metrics import classification_report
 from skimage.color import label2rgb
 from torchvision.utils import make_grid, save_image
+from pytorch_fid.fid_score import calculate_fid_given_paths
 
 LABELS = [0, 1, 2, 3]
 TARGET_NAMES = 'Background Normal Contraction Expansion'.split()
 LABEL_DICT = {k: v for k, v in zip(LABELS, TARGET_NAMES)}
-
 
 def set_requires_grad(nets, requires_grad=False):
     if not isinstance(nets, list):
@@ -38,7 +38,7 @@ def train_one_epoch(
 
     for iter, (src, dst, cond, _) in enumerate(train_loader, 1):
 
-        src = src.to(device)
+        src = src.to(device).float()
         dst = dst.to(device)
         cond = cond.to(device).float()
 
@@ -86,7 +86,7 @@ def evaluate(G: torch.nn.Module, data_loader: torch.utils.data.DataLoader, epoch
 
     for src, dst, cond, src_error in data_loader:
 
-        src = src.to(device)
+        src = src.to(device).float()
         cond = cond.to(device).float()
         pred = G(src, cond)
 
@@ -119,7 +119,7 @@ def generate(G: torch.nn.Module, data_loader: torch.utils.data.DataLoader, devic
     pred_images = []
     for src, dst, cond, src_error in data_loader:
 
-        src = src.to(device)
+        src = src.to(device).float()
         cond = cond.to(device).float()
         pred = G(src, cond).detach().cpu()
 
@@ -136,11 +136,11 @@ def generate(G: torch.nn.Module, data_loader: torch.utils.data.DataLoader, devic
         real_images.append(dst_rgb)
         pred_images.append(pred_rgb)
 
-    for org_filename, real_img in zip(data_loader.dataset.dataset.dst_images, real_images):
+    for org_filename, real_img in zip(data_loader.dataset.dst_images, real_images):
         save_path = os.path.join(args.output_dir, "real", os.path.basename(org_filename))
         save_image(real_img, save_path)
 
-    for org_filename, pred_img in zip(data_loader.dataset.dataset.dst_images, pred_images):
+    for org_filename, pred_img in zip(data_loader.dataset.dst_images, pred_images):
         save_path = os.path.join(args.output_dir, "pred", os.path.basename(org_filename))
         save_image(pred_img, save_path)
 
