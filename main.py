@@ -12,7 +12,7 @@ from torch.utils.tensorboard import SummaryWriter
 from dataset import get_dataset
 from engine import train_one_epoch, evaluate, generate
 from losses import GANLoss, VGGPerceptualLoss
-from networks import ResnetGenerator, UNetGenerator, NLayerDiscriminator, init_weights, get_norm_layer
+from models import get_model
 
 
 def get_args():
@@ -22,10 +22,12 @@ def get_args():
                         help='the type of GAN objective. [vanilla| lsgan | wgangp]. vanilla GAN loss is the cross-entropy objective used in the original GAN paper.')
     parser.add_argument('--lambda_VGG', type=float, default=100.,
                         help='weight for the content(VGG) loss (originally proposed in SRGAN)')
+    parser.add_argument('--style_layers', type=int, nargs="+", default=[])
+    parser.add_argument('--max_grad_norm', type=float, default=0.0)
     parser.add_argument('--smoothing', type=float, default=0.1)
 
     # model parameters
-    parser.add_argument('--netG', type=str, default='resnet', choices=['unet', 'resnet'])
+    parser.add_argument('--netG', type=str, default='resnet', choices=['attn', 'unet', 'resnet'])
     parser.add_argument('--norm_type', default='instance', type=str, choices=['batch', 'instance', 'none'])
     parser.add_argument('--no_dropout', action='store_true')
     parser.add_argument('--input_nc', type=int, default=1,
@@ -34,6 +36,7 @@ def get_args():
                         help='# of output image channels: 3 for RGB and 1 for grayscale')
     parser.add_argument('--ngf', type=int, default=64, help='# of gen filters in the last conv layer')
     parser.add_argument('--ndf', type=int, default=64, help='# of disc filters in the first conv layer')
+    parser.add_argument('--n_heads', type=int, default=4)
     parser.add_argument('--n_layers_G', type=int, default=9, help='only used if netD==n_layers')
     parser.add_argument('--n_layers_D', type=int, default=2, help='only used if netD==n_layers')
     parser.add_argument('--init_type', type=str, default='normal',
@@ -48,7 +51,7 @@ def get_args():
     parser.add_argument('--csv_fpath', type=str, default='./data/data/Metadata/data.csv')
     parser.add_argument('--num_threads', default=4, type=int, help='# threads for loading data')
     parser.add_argument('--batch_size', type=int, default=1, help='input batch size')
-    parser.add_argument('--input-size', type=int, default=[], nargs="+", help='input size. empty for no resizing')
+    parser.add_argument('--input_size', type=int, default=[], nargs="+", help='input size. empty for no resizing')
 
     # training parameters
     parser.add_argument('--n_epochs', type=int, default=50, help='number of epochs with the initial learning rate')
@@ -116,18 +119,9 @@ def main(args):
 
     # get model
     num_embeddings = train_dataset.conditions.shape[1]
-    use_dropout = not args.no_dropout
-    if args.netG == 'unet':
-        netG = UNetGenerator(output_nc=args.output_nc, input_nc=args.input_nc, norm_type=args.norm_type).to(device)
-    else:
-        norm_layer = get_norm_layer(args.norm_type)
-        netG = ResnetGenerator(args.input_nc, args.output_nc, num_embeddings, args.ngf, norm_layer=norm_layer,
-                               use_dropout=use_dropout, n_blocks=args.n_layers_G).to(device)
-    netD = NLayerDiscriminator(input_nc=args.input_nc + args.output_nc, ndf=args.ndf, n_layers=args.n_layers_D).to(
-        device)
-
-    init_weights(netG, args.init_type, args.init_gain)
-    init_weights(netD, args.init_type, args.init_gain)
+    netG, netD = get_model(num_embeddings, args)
+    netG.to(device)
+    netD.to(device)
 
     optimizer_G = torch.optim.Adam(netG.parameters(), lr=args.lr, betas=(args.beta1, 0.999))
     optimizer_D = torch.optim.Adam(netD.parameters(), lr=args.lr, betas=(args.beta1, 0.999))

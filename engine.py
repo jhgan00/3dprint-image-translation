@@ -26,7 +26,7 @@ def train_one_epoch(G: torch.nn.Module, D: torch.nn.Module, optimG: torch.nn.Mod
         schedG.step()
         schedD.step()
 
-    for iter, (real_A, real_B, cond, _) in enumerate(train_loader, 1):
+    for iter, (real_A, real_B, cond) in enumerate(train_loader, 1):
 
         real_A = real_A.to(device).float()
         real_B = real_B.to(device).float()
@@ -45,6 +45,8 @@ def train_one_epoch(G: torch.nn.Module, D: torch.nn.Module, optimG: torch.nn.Mod
             loss_D_real = adv_loss(pred_real, True)
             loss_D = (loss_D_fake + loss_D_real) * 0.5
         loss_D.backward()
+        if args.max_grad_norm:
+            torch.nn.utils.clip_grad_norm_(D.parameters(), args.max_grad_norm)
         optimD.step()  # update D's weights
 
         with torch.cuda.amp.autocast():
@@ -54,9 +56,11 @@ def train_one_epoch(G: torch.nn.Module, D: torch.nn.Module, optimG: torch.nn.Mod
             fake_AB = torch.cat((real_A, fake_B), 1)
             pred_fake = D(fake_AB, cond, G.condition_embedding.embeddings)
             loss_G_GAN = adv_loss(pred_fake, True)
-            loss_G_VGG = vgg_loss(fake_B, real_B) * args.lambda_VGG
+            loss_G_VGG = vgg_loss(fake_B * 0.5 + 0.5, real_B * 0.5 + 0.5, style_layers=args.style_layers) * args.lambda_VGG
             loss_G = loss_G_GAN + loss_G_VGG
         loss_G.backward()
+        if args.max_grad_norm:
+            torch.nn.utils.clip_grad_norm_(G.parameters(), args.max_grad_norm)
         optimG.step()  # udpate G's weights
 
         global_step = (epoch - 1) * len(train_loader) + iter
@@ -97,14 +101,14 @@ def evaluate(G: torch.nn.Module, data_loader: torch.utils.data.DataLoader, epoch
     fake_images = []
     real_errors = []
 
-    for src, dst, cond, real_error in data_loader:
+    for src, dst, cond in data_loader:
         src = src.to(device).float()
         cond = cond.to(device).float()
         fake = G(src, cond)
 
-        real_images.append(dst.detach().cpu())
-        fake_images.append(fake.detach().cpu())
-        real_errors.append(real_error.float().detach())
+        real_images += list(dst.detach().cpu())
+        fake_images += list(fake.detach().cpu())
+        # real_errors.append(real_error.float().detach())
 
     i = random.randint(0, len(real_images) - 1)
     log_writer.add_image(f'test/real', make_grid(real_images[i], nrow=1, value_range=(-1, 1), normalize=True), epoch)
@@ -136,7 +140,7 @@ def generate(G: torch.nn.Module, data_loader: torch.utils.data.DataLoader, epoch
              save_images: bool, log_writer, args):
     G.eval()
     fake_images = []
-    for src, _, cond, real_error in data_loader:
+    for src, _, cond in data_loader:
         src = src.to(device)
         cond = cond.to(device)
         fake = G(src, cond)

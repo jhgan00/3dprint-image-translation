@@ -1,14 +1,11 @@
 import os
 import random
-from pathlib import Path
 from typing import Tuple
 
 import cv2
 import numpy as np
 import pandas as pd
-import torch
 from PIL import Image, ImageOps
-from sklearn.preprocessing import MinMaxScaler
 from torch.utils.data import Dataset
 from torchvision import transforms
 
@@ -31,6 +28,8 @@ def get_dataset(args) -> Tuple[Dataset]:
 
     if args.dataset == "hdjoong":
         dataset_train = HDDataset(args.src_dir, args.dst_dir, args.csv_fpath, src_transform, dst_transform, split="train")
+        dataset_valid = HDDataset(args.src_dir, args.dst_dir, args.csv_fpath, src_transform, dst_transform, split="valid")
+        dataset_test = HDDataset(args.src_dir, args.dst_dir, args.csv_fpath, src_transform, dst_transform, split="test")
 
     return dataset_train, dataset_valid, dataset_test
 
@@ -134,7 +133,7 @@ class TDPDataset(Dataset):
         conditions = self.conditions[i]
         real_error = self.real_error[i]
 
-        return src, dst, conditions, real_error
+        return src, dst, conditions
 
     def __len__(self):
 
@@ -146,27 +145,14 @@ class HDDataset(Dataset):
     def __init__(self, src_dir, dst_dir, csv_fpath, src_transform, dst_transform, split):
 
         """도면 이미지, 출력 이미지, 메타데이터"""
+        df = pd.read_csv(csv_fpath, encoding='utf-8').query(f"split=='{split}'").drop(columns=["split"])
         self.split = split
-        self.src_images = []
-        self.dst_images = []
-        self.cases = {}  # Metadata csv file to dict
-        df = pd.read_csv(csv_fpath, encoding='utf-8-sig')
-        scaler = MinMaxScaler()  # call scaler
+        self.src_images = [os.path.join(src_dir, x) for x in df.src.values]
+        self.dst_images = [os.path.join(dst_dir, x) for x in df.dst.values]
+        self.conditions = df.iloc[:, 2:].values
 
         self.src_transform = src_transform
         self.dst_transform = dst_transform
-
-        scaled = scaler.fit_transform(df.iloc[:, 1:])  # raw metadata scaling
-        for i in range(len(df)):  # key: case index, data : metadata columns(9ea)
-            self.cases[df['case'][i]] = scaled[i, 0:]
-
-        for dst in Path(dst_dir).rglob('*.png'):
-            self.case = dst.stem.split("_")
-            src = os.path.join(src_dir, f"base_{self.case[1]}_{self.case[3]}.jpg")
-            assert os.path.isfile(src)
-            dst = str(dst)
-            self.src_images.append(src)
-            self.dst_images.append(dst)
 
     def __getitem__(self, i):
 
@@ -196,8 +182,7 @@ class HDDataset(Dataset):
         src = self.src_transform(src)
         dst = self.dst_transform(dst)
 
-        case = self.src_images[i].split('.')[0][-7:-3]
-        conditions = torch.Tensor(self.cases[case])
+        conditions = self.conditions[i]
 
         return src, dst, conditions
 
