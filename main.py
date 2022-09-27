@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 from dataset import get_dataset
-from engine import train_one_epoch, evaluate, generate
+from engine import train_one_epoch, evaluate
 from losses import GANLoss, VGGPerceptualLoss
 from models import get_model
 
@@ -22,6 +22,7 @@ def get_args():
                         help='the type of GAN objective. [vanilla| lsgan | wgangp]. vanilla GAN loss is the cross-entropy objective used in the original GAN paper.')
     parser.add_argument('--lambda_VGG', type=float, default=100.,
                         help='weight for the content(VGG) loss (originally proposed in SRGAN)')
+    parser.add_argument('--feature_layers', type=int, nargs="+", default=[0, 1, 2, 3])
     parser.add_argument('--style_layers', type=int, nargs="+", default=[])
     parser.add_argument('--max_grad_norm', type=float, default=0.0)
     parser.add_argument('--smoothing', type=float, default=0.1)
@@ -29,7 +30,7 @@ def get_args():
     # model parameters
     parser.add_argument('--netG', type=str, default='resnet', choices=['attn', 'unet', 'resnet'])
     parser.add_argument('--norm_type', default='instance', type=str, choices=['batch', 'instance', 'none'])
-    parser.add_argument('--no_dropout', action='store_true')
+    parser.add_argument('--dropout', default=0.5, type=float)
     parser.add_argument('--input_nc', type=int, default=1,
                         help='# of input image channels: 3 for RGB and 1 for grayscale')
     parser.add_argument('--output_nc', type=int, default=1,
@@ -134,6 +135,9 @@ def main(args):
         log_writer = SummaryWriter(args.log_dir)
 
     # train pix2pix
+    best_fid = np.inf
+    best_pixel_loss = np.inf
+
     for epoch in range(1, args.total_epochs + 1):
 
         train_one_epoch(
@@ -152,13 +156,23 @@ def main(args):
             args
         )
 
-        evaluate(netG, valid_loader, epoch, device, log_writer, args)
+        eval_dict = evaluate(netG, valid_loader, epoch, device, 'valid', log_writer, args)
 
         if not epoch % args.ckpt_freq:
-            save_path = os.path.join(args.checkpoint_dir, f'checkpoint-{epoch}.pth')
+            save_path = os.path.join(args.checkpoint_dir, f'checkpoint.{epoch}.pth')
             torch.save(netG.state_dict(), save_path)
 
-    evaluate(netG, test_loader, args.n_epochs, device, log_writer, args)
+        if eval_dict['fid'] < best_fid:
+            save_path = os.path.join(args.checkpoint_dir, f'checkpoint.best.fid.pth')
+            torch.save(netG.state_dict(), save_path)
+
+        if eval_dict['pixel_loss'] < best_pixel_loss:
+            save_path = os.path.join(args.checkpoint_dir, f'checkpoint.best.pixel_loss.pth')
+            torch.save(netG.state_dict(), save_path)
+
+    save_path = os.path.join(args.checkpoint_dir, f'checkpoint.best.pixel_loss.pth')
+    netG.load_state_dict(torch.load(save_path))
+    evaluate(netG, test_loader, args.n_epochs, device, 'test', log_writer, args)
 
 
 if __name__ == "__main__":

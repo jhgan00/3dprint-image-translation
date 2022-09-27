@@ -28,6 +28,7 @@ class AttentionBlock(nn.Module):
         self.d_model = d_model
         self.nhead = nhead
         self.attn = nn.MultiheadAttention(d_model, nhead, batch_first=True)
+        self.norm = nn.BatchNorm2d(d_model)
 
     def forward(self, x, cond):
         """
@@ -39,12 +40,12 @@ class AttentionBlock(nn.Module):
         res = x.view(batch_size, -1, self.d_model)
         res, _ = self.attn(res, cond, cond)
         res = res.reshape(*x.shape)
-        return x + res
+        return self.norm(x + res)
 
 
 class AttentionalResnetGenerator(nn.Module):
 
-    def __init__(self, input_nc, output_nc, num_embeddings, ngf=64, norm_layer=nn.BatchNorm2d, use_dropout=False, n_blocks=6, n_heads=4, padding_type='reflect'):
+    def __init__(self, input_nc, output_nc, num_embeddings, ngf=64, norm_layer=nn.BatchNorm2d, dropout=False, n_blocks=6, n_heads=4, padding_type='reflect'):
         """Construct a Resnet-based generator
         Parameters:
             input_nc (int)      -- the number of channels in input images
@@ -81,8 +82,8 @@ class AttentionalResnetGenerator(nn.Module):
         for i in range(n_blocks):       # add ResNet blocks
 
             res += [
-                ResnetBlock(ngf * mult, padding_type=padding_type, norm_layer=norm_layer, use_dropout=use_dropout, use_bias=use_bias),
-                AttentionBlock(d_model=ngf * mult, nhead=n_heads)
+                AttentionBlock(d_model=ngf * mult, nhead=n_heads),
+                ResnetBlock(ngf * mult, padding_type=padding_type, norm_layer=norm_layer, dropout=dropout, use_bias=use_bias),
             ]
 
         up = []

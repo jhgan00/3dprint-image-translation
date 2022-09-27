@@ -8,8 +8,8 @@ python main.py \
 --n_epochs_decay 20 \
 --input_nc 1 \
 --output_nc 1 \
---n_layers_D 2 \
---ndf 32 \
+--n_layers_D 3 \
+--ndf 64 \
 --src_dir "./data/$DATASET/Blueprint" \
 --dst_dir "./data/$DATASET/Target" \
 --csv_fpath "./data/$DATASET/data.csv" \
@@ -17,4 +17,8 @@ python main.py \
 --output_dir ./experiments/$DATASET/outputs \
 --log_dir ./experiments/$DATASET/logs \
 --checkpoint_dir ./experiments/$DATASET/checkpoints \
---max_grad_norm 1
+--max_grad_norm 1. \
+--smoothing 0.1 \
+--device cuda:0 \
+--dropout 0.5 \
+--expr_name hdjoong

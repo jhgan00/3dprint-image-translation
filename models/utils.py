@@ -14,7 +14,6 @@ class Identity(nn.Module):
 
 def get_model(num_embeddings, args):
 
-    use_dropout = not args.no_dropout
     netG, netD = None, None
 
     if args.netG == 'unet':
@@ -22,11 +21,11 @@ def get_model(num_embeddings, args):
     elif args.netG == 'resnet':
         norm_layer = get_norm_layer(args.norm_type)
         netG = ResnetGenerator(args.input_nc, args.output_nc, num_embeddings, args.ngf, norm_layer=norm_layer,
-                               use_dropout=use_dropout, n_blocks=args.n_layers_G)
+                               dropout=args.dropout, n_blocks=args.n_layers_G)
     else:
         norm_layer = get_norm_layer(args.norm_type)
         netG = AttentionalResnetGenerator(args.input_nc, args.output_nc, num_embeddings, args.ngf, norm_layer=norm_layer,
-                                          use_dropout=use_dropout, n_blocks=args.n_layers_G, n_heads=args.n_heads)
+                                          dropout=args.dropout, n_blocks=args.n_layers_G, n_heads=args.n_heads)
 
     netD = NLayerDiscriminator(input_nc=args.input_nc + args.output_nc, ndf=args.ndf, n_layers=args.n_layers_D)
 

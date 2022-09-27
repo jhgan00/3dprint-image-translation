@@ -52,16 +52,17 @@ def mean_absolute_cri_error(pred, true, max_rad=100, return_error_array=False):
         return abs_error.mean()
 
 
-def mean_pixel_loss(pred, true, p=1):
+def mean_pixel_loss(pred, true, device='cpu'):
     """
     :param pred: torch.Tensor (N x H x W)
     :param true: torch.Tensor (N x H x W)
     :return: 픽셀 로스
     """
     assert pred.shape == true.shape
-    pred = torch.Tensor(pred).type(torch.float32)
-    true = torch.Tensor(true).type(torch.float32)
-    return torch.linalg.norm(pred - true, p, (1, 2)).mean().item()
+    pred = pred.to(device)
+    true = true.to(device)
+
+    return (pred - true).abs().sum(dim=list(range(1, len(pred.shape)))).mean()
 
 
 class ScoreMetric:
@@ -88,6 +89,9 @@ class ScoreMetric:
             elif isinstance(fake, torch.Tensor):  # tensor 일 때
                 neg = np.where(fake > 0, 0, fake).sum() / neg_num  # negative error
                 pos = np.where(fake < 0, 0, fake).sum() / pos_num  # positive error
+
+            else:
+                raise TypeError
 
             error = (abs(neg) + pos) / 2  # average error
             error_rate = abs(real_error[i] - error) / real_error[i]  # error rate
