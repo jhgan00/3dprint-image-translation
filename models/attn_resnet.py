@@ -10,14 +10,14 @@ class SelfAttentionConditionEmbedding(nn.Module):
         super().__init__()
         w = torch.normal(0., 0.02, size=(1, num_vocab, d_model))
         self.embeddings = nn.Parameter(data=w, requires_grad=True)
-        self.encoder = nn.Sequential(*[
-            nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, dim_feedforward=d_ffn)
-            for _ in range(num_layers)
-        ])
+        # self.encoder = nn.Sequential(*[
+        #     nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, dim_feedforward=d_ffn)
+        #     for _ in range(num_layers)
+        # ])
 
     def forward(self, x):
         x = self.embeddings * x.unsqueeze(-1)
-        x = self.encoder(x)
+        # x = self.encoder(x)
         return x
 
 
@@ -28,7 +28,7 @@ class AttentionBlock(nn.Module):
         self.d_model = d_model
         self.nhead = nhead
         self.attn = nn.MultiheadAttention(d_model, nhead, batch_first=True)
-        self.norm = nn.BatchNorm2d(d_model)
+        self.norm = nn.LayerNorm([d_model, 128, 128])
 
     def forward(self, x, cond):
         """
@@ -102,7 +102,7 @@ class AttentionalResnetGenerator(nn.Module):
         self.down = nn.Sequential(*down)
         self.res = nn.ModuleList(res)
         self.up = nn.Sequential(*up)
-        self.condition_embedding = SelfAttentionConditionEmbedding(num_embeddings, ngf * 2 ** n_downsampling, 1024, n_heads, num_layers=4)
+        self.condition_embedding = SelfAttentionConditionEmbedding(num_embeddings, ngf * 2 ** n_downsampling, 512, n_heads, num_layers=2)
 
     def forward(self, x, cond):
         """Standard forward w/ condition embeddings"""

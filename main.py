@@ -46,13 +46,13 @@ def get_args():
                         help='scaling factor for normal, xavier and orthogonal.')
 
     # dataset parameters
-    parser.add_argument('--dataset', type=str, default='tdp-color', choices=['tdp-color', 'tdp-gray', 'hdjoong'])
-    parser.add_argument('--src_dir', type=str, default='./data/data/Blueprint')
-    parser.add_argument('--dst_dir', type=str, default='./data/data/Mash')
-    parser.add_argument('--csv_fpath', type=str, default='./data/data/Metadata/data.csv')
+    parser.add_argument('--dataset', type=str, default='fdm-gray', choices=['fdm-gray', 'hdjoong'])
+    parser.add_argument('--src_dir', type=str, default='./data/tdp-fdm/Blueprint')
+    parser.add_argument('--dst_dir', type=str, default='./data/tdp-fdm/Mash')
+    parser.add_argument('--csv_fpath', type=str, default='./data/tdp-fdm/Metadata/data.csv')
     parser.add_argument('--num_threads', default=4, type=int, help='# threads for loading data')
     parser.add_argument('--batch_size', type=int, default=1, help='input batch size')
-    parser.add_argument('--input_size', type=int, default=[], nargs="+", help='input size. empty for no resizing')
+    parser.add_argument('--input_size', type=int, default=[512, 512], nargs="+", help='input size. empty for no resizing')
 
     # training parameters
     parser.add_argument('--n_epochs', type=int, default=50, help='number of epochs with the initial learning rate')
@@ -84,6 +84,7 @@ def get_args():
         os.makedirs(os.path.join(args.output_dir, "real"))
     if not os.path.exists(os.path.join(args.output_dir, "fake")):
         os.makedirs(os.path.join(args.output_dir, "fake"))
+        torch.save(args, os.path.join(args.output_dir, "fake", "args.pt"))
     args.total_epochs = args.n_epochs + args.n_epochs_decay
     return args
 
@@ -163,10 +164,12 @@ def main(args):
             torch.save(netG.state_dict(), save_path)
 
         if eval_dict['fid'] < best_fid:
+            best_fid = eval_dict['fid']
             save_path = os.path.join(args.checkpoint_dir, f'checkpoint.best.fid.pth')
             torch.save(netG.state_dict(), save_path)
 
         if eval_dict['pixel_loss'] < best_pixel_loss:
+            best_pixel_loss = eval_dict['pixel_loss']
             save_path = os.path.join(args.checkpoint_dir, f'checkpoint.best.pixel_loss.pth')
             torch.save(netG.state_dict(), save_path)
 

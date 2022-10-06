@@ -1,0 +1,23 @@
+DATASET="tdp-fdm-color"
+python main.py \
+--dataset $DATASET \
+--n_epochs 50 \
+--n_epochs_decay 100 \
+--input_nc 1 \
+--output_nc 3 \
+--n_layers_D 2 \
+--batch_size 4 \
+--ndf 32 \
+--dataset "tdp-color" \
+--src_dir "./data/tdp-fdm/Blueprint" \
+--dst_dir "./data/tdp-fdm/Mash" \
+--csv_fpath "./data/tdp-fdm/Metadata/data.csv" \
+--lr_decay_iters 25 \
+--output_dir ./experiments/$DATASET/outputs \
+--log_dir ./experiments/$DATASET/logs \
+--checkpoint_dir ./experiments/$DATASET/checkpoints \
+--dropout 0.5 \
+--expr_name nld-2-ndf-32-vgg-100-bs-4-inpsize-512-gc-1 \
+--max_grad_norm 1. \
+--input_size 512 512 \
+--lambda_VGG 100

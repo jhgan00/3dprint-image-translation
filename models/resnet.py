@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 import functools
+import torch.nn.functional as F
 
 
 class ResnetGenerator(nn.Module):
@@ -133,8 +134,38 @@ class ConditionEmbedding(nn.Module):
         super().__init__()
         w = torch.empty(size=(num_vocab, embed_dim))
         nn.init.normal_(w)
-        self.embeddings = nn.Parameter(data=w, requires_grad=True)
+        # self.embeddings = nn.Parameter(data=w, requires_grad=True)
+        self.fc = nn.Sequential(
+            nn.Linear(num_vocab, embed_dim // 2),
+            nn.Tanh(),
+            nn.Linear(embed_dim // 2, embed_dim),
+            nn.Tanh(),
+        )
+        self.attn = AttentionBlock(256, 1)
 
     def forward(self, x, conditions: torch.Tensor):
-        return x + (self.embeddings.unsqueeze(0) * conditions.unsqueeze(-1)).mean(axis=1).unsqueeze(-1).unsqueeze(-1)
+        conditions = self.fc(conditions).unsqueeze(1)
+        return self.attn(x, conditions)
+        # return x + (e.unsqueeze(0) * conditions.unsqueeze(-1)).mean(axis=1).unsqueeze(-1).unsqueeze(-1)
 
+
+class AttentionBlock(nn.Module):
+
+    def __init__(self, d_model: int, nhead: int):
+        super().__init__()
+        self.d_model = d_model
+        self.nhead = nhead
+        self.attn = nn.MultiheadAttention(d_model, nhead, batch_first=True)
+        self.norm = nn.LayerNorm([d_model, 128, 128])
+
+    def forward(self, x, cond):
+        """
+        :param x: batch x ngf x w x h 크기의 텐서 (이미지)
+        :param cond:  ngf 크기의 텐서 (환경변수)
+        :return:
+        """
+        batch_size = x.size(0)
+        res = x.view(batch_size, -1, self.d_model)
+        res, _ = self.attn(res, cond, cond)
+        res = res.reshape(*x.shape)
+        return self.norm(x + res)

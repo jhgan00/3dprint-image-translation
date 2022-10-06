@@ -8,43 +8,64 @@ import pandas as pd
 from PIL import Image, ImageOps
 from torch.utils.data import Dataset
 from torchvision import transforms
+from sklearn.preprocessing import MinMaxScaler
 
 
 def get_dataset(args) -> Tuple[Dataset]:
 
-    dataset_train, dataset_valid, dataset_test = None, None, None
     src_transform = build_transform(args.input_size, args.input_nc)
     dst_transform = build_transform(args.input_size, args.output_nc)
 
-    if args.dataset == "tdp-color":
-        dataset_train = TDPDataset(args.dst_dir, args.csv_fpath, src_transform, dst_transform, split="train", dst_grayscale=False)
-        dataset_valid = TDPDataset(args.dst_dir, args.csv_fpath, src_transform, dst_transform, split="valid", dst_grayscale=False)
-        dataset_test  = TDPDataset(args.dst_dir, args.csv_fpath, src_transform, dst_transform, split="test", dst_grayscale=False)
+    if args.dataset == "fdm-color":
+        dataset_train = FDMDataset(args.src_dir, args.dst_dir, args.csv_fpath, args.input_size, split="train", dst_grayscale=False)
+        dataset_valid = FDMDataset(args.src_dir, args.dst_dir, args.csv_fpath, args.input_size, split="valid", dst_grayscale=False)
+        dataset_test  = FDMDataset(args.src_dir, args.dst_dir, args.csv_fpath, args.input_size, split="test", dst_grayscale=False)
 
-    if args.dataset == "tdp-gray":
-        dataset_train = TDPDataset(args.dst_dir, args.csv_fpath, src_transform, dst_transform, split="train")
-        dataset_valid = TDPDataset(args.dst_dir, args.csv_fpath, src_transform, dst_transform, split="valid")
-        dataset_test  = TDPDataset(args.dst_dir, args.csv_fpath, src_transform, dst_transform, split="test")
+    elif args.dataset == "fdm-gray":
+        dataset_train = FDMDataset(args.src_dir, args.dst_dir, args.csv_fpath, args.input_size, split="train")
+        dataset_valid = FDMDataset(args.src_dir, args.dst_dir, args.csv_fpath, args.input_size, split="valid")
+        dataset_test  = FDMDataset(args.src_dir, args.dst_dir, args.csv_fpath, args.input_size, split="test")
 
-    if args.dataset == "hdjoong":
+    elif args.dataset == "sla-color":
+        dataset_train = SLADataset(args.src_dir, args.dst_dir, args.csv_fpath, args.input_size, split="train", dst_grayscale=False)
+        dataset_valid = SLADataset(args.src_dir, args.dst_dir, args.csv_fpath, args.input_size, split="valid", dst_grayscale=False)
+        dataset_test = SLADataset(args.src_dir, args.dst_dir, args.csv_fpath, args.input_size, split="test", dst_grayscale=False)
+
+    elif args.dataset == "sla-gray":
+        dataset_train = SLADataset(args.src_dir, args.dst_dir, args.csv_fpath, args.input_size, split="train")
+        dataset_valid = SLADataset(args.src_dir, args.dst_dir, args.csv_fpath, args.input_size, split="valid")
+        dataset_test = SLADataset(args.src_dir, args.dst_dir, args.csv_fpath, args.input_size, split="test")
+
+    elif args.dataset == "hdjoong":
         dataset_train = HDDataset(args.src_dir, args.dst_dir, args.csv_fpath, src_transform, dst_transform, split="train")
         dataset_valid = HDDataset(args.src_dir, args.dst_dir, args.csv_fpath, src_transform, dst_transform, split="valid")
         dataset_test = HDDataset(args.src_dir, args.dst_dir, args.csv_fpath, src_transform, dst_transform, split="test")
 
+    else:
+        raise NotImplementedError(f"Dataset {args.dataset} is not implemented yet")
+
     return dataset_train, dataset_valid, dataset_test
 
 
-def padding(image, value=255):
+def resize_and_pad(image, input_size, value=255):
     """ 높이, 너비를 4로 나누어 떨어지도록 패딩 """
     w, h = image.size[0], image.size[1]
-    if w % 4 == (0 or 2):
-        p_left, p_right = (w % 4) / 2, (w % 4) / 2
+    longer = max(w, h)
+
+    if isinstance(input_size, list):
+        input_size = max(input_size)
+
+    w, h = int(w * (input_size / longer)), int(h * (input_size / longer))
+    image = image.resize((w, h))
+    if w % 2 == 0:
+        p_left, p_right = (input_size - w) // 2, (input_size - w) // 2
     else:
-        p_left, p_right = (w % 4) // 2, (w % 4) // 2 - (w % 4) // 2
-    if h % 4 == (0 or 2):
-        p_top, p_bottom = (h % 4) / 2, (h % 4) / 2
+        p_left, p_right = (input_size - w) // 2, (input_size - w) - ((input_size - w) // 2)
+    if h % 2 == 0:
+        p_top, p_bottom = (input_size - h) // 2, (input_size - h) // 2
     else:
-        p_top, p_bottom = (h % 4) // 2, (h % 4) // 2 - (h % 4) // 2
+        p_top, p_bottom = (input_size - h) // 2, (input_size - h) - ((input_size - h) // 2)
+
     padding = (int(p_left), int(p_top), int(p_right), int(p_bottom))
     return transforms.functional.pad(image, padding, value, 'constant')
 
@@ -58,7 +79,68 @@ def build_transform(input_size, num_channels):
     return transforms.Compose(t)
 
 
-class TDPDataset(Dataset):
+class FDMDataset(Dataset):
+
+    b_lo = np.array([80, 20, 100])  # 수축
+    b_hi = np.array([139, 255, 255])
+    ry_lo = np.array([0, 20, 100])  # 팽창
+    ry_hi = np.array([39, 255, 255])
+    rp_lo = np.array([140, 20, 100])
+    rp_hi = np.array([179, 255, 255])
+
+    def __init__(self, src_dir, dst_dir, csv_fpath, input_size, split, dst_grayscale=True):
+        """도면 이미지, 출력 이미지, 프린터 파라미터, 변형률 정보"""
+
+        df = pd.read_csv(csv_fpath, encoding='utf-8-sig').query(f"split=='{split}'")
+        self.src_images = df['src'].values
+        self.dst_images = df['dst'].values
+        self.conditions = df.iloc[:, 2:-8].values
+        self.real_error = MinMaxScaler().fit_transform(df.iloc[:, -8:-1].values)
+
+        self.src_dir = src_dir
+        self.dst_dir = dst_dir
+        self.input_size = input_size
+        self.split = split
+        self.dst_grayscale = dst_grayscale
+
+    def __getitem__(self, i):
+
+        src_fpath = os.path.join(self.src_dir, self.src_images[i])
+        dst_fpath = os.path.join(self.dst_dir, self.dst_images[i])
+
+        src = Image.open(src_fpath).convert("L")
+        dst = Image.open(dst_fpath)
+        dst = dst.resize(size=src.size)
+
+        src = resize_and_pad(src, self.input_size)
+        dst = resize_and_pad(dst, self.input_size)
+
+        if self.dst_grayscale:
+
+            dst = cv2.cvtColor(np.array(dst), cv2.COLOR_BGR2HSV)
+            b = cv2.inRange(dst, FDMDataset.b_lo, FDMDataset.b_hi)
+            r = cv2.inRange(dst, FDMDataset.ry_lo, FDMDataset.ry_hi) + cv2.inRange(dst, FDMDataset.rp_lo, FDMDataset.rp_hi)
+            target1 = np.where(b > 1, 1., 0.)
+            target2 = np.where(r > 1, 1., 0.)
+            dst = (-target1 + target2 + 1.) * 0.5
+
+        src = transforms.functional.to_tensor(src)
+        src = transforms.functional.normalize(src, (.5,), (.5,))
+
+        dst = transforms.functional.to_tensor(dst)
+        dst = transforms.functional.normalize(dst, (0.5,), (0.5,))
+
+        conditions = self.conditions[i]
+        real_error = self.real_error[i]
+
+        return src, dst, conditions, real_error
+
+    def __len__(self):
+
+        return len(self.dst_images)
+
+
+class SLADataset(Dataset):
 
     l_lo = np.array([0, 0, 0])  # 도면 라인 추정
     l_hi = np.array([179, 255, 150])
@@ -71,72 +153,52 @@ class TDPDataset(Dataset):
     rp_lo = np.array([140, 20, 100])
     rp_hi = np.array([179, 255, 255])
 
-    def __init__(self, dst_dir, csv_fpath, src_transform, dst_transform, split, dst_grayscale=True):
-
+    def __init__(self, src_dir, dst_dir, csv_fpath, input_size, split, dst_grayscale=True):
         """도면 이미지, 출력 이미지, 프린터 파라미터, 변형률 정보"""
 
         df = pd.read_csv(csv_fpath, encoding='utf-8-sig').query(f"split=='{split}'")
-
+        self.src_images = df['src'].values
         self.dst_images = df['dst'].values
         self.conditions = df.iloc[:, 2:-8].values
-        self.real_error = df['Out.Tol.(%)'].values
+        self.real_error = MinMaxScaler().fit_transform(df.iloc[:, -8:-1].values)
+
+        self.src_dir = src_dir
         self.dst_dir = dst_dir
-
-        self.src_transform = src_transform
-        self.dst_transform = dst_transform
-
+        self.input_size = input_size
         self.split = split
         self.dst_grayscale = dst_grayscale
 
     def __getitem__(self, i):
-        # 이미지 경로
+        src_fpath = os.path.join(self.src_dir, self.src_images[i])
         dst_fpath = os.path.join(self.dst_dir, self.dst_images[i])
 
-        # 이미지 읽기 : 패딩 & 리사이즈를 먼저 하기: 처리를 다 하고 나중에 BICUBIC 리사이징 하는 경우 리사이징 알고리즘으로 인해 값이 틀어짐
-        src = Image.open(dst_fpath)
-        src = padding(src)
-        dst = np.copy(src)
-        src = cv2.cvtColor(np.array(src), cv2.COLOR_RGB2HSV)
+        src = Image.open(src_fpath).convert("L")
+        dst = Image.open(dst_fpath)
+        dst = dst.resize(size=src.size)
 
-        l = cv2.inRange(src, TDPDataset.l_lo,  TDPDataset.l_hi)
-        g = cv2.inRange(src,  TDPDataset.g_lo,  TDPDataset.g_hi)
-        k = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7))
-        g = cv2.erode(g, k)
-        b = cv2.inRange(src,  TDPDataset.b_lo,  TDPDataset.b_hi)
-        ry = cv2.inRange(src,  TDPDataset.ry_lo,  TDPDataset.ry_hi)
-        rp = cv2.inRange(src,  TDPDataset.rp_lo,  TDPDataset.rp_hi)
-        r = ry + rp
+        src = resize_and_pad(src, self.input_size)
+        dst = resize_and_pad(dst, self.input_size)
 
-        # 0, 255 to 0, 1
-        src = np.where(l + g > 1, 1., 0.)  # 인풋
+        dst = cv2.cvtColor(np.array(dst), cv2.COLOR_BGR2HSV)
+        b = cv2.inRange(dst, FDMDataset.b_lo, FDMDataset.b_hi)
+        r = cv2.inRange(dst, FDMDataset.ry_lo, FDMDataset.ry_hi) + cv2.inRange(dst, FDMDataset.rp_lo, FDMDataset.rp_hi)
 
-        # 인풋&타겟 이미지 생성
-        if self.dst_grayscale:
-            target_1 = np.where(b > 1, 1., 0.)  # 수축
-            target_2 = np.where(r > 1, 1., 0.)  # 팽창
-            dst = (-target_1 + target_2 + 1.) * 0.5
+        target1 = np.where(b > 1, 1., 0.)
+        target2 = np.where(r > 1, 1., 0.)
 
-        src = self.src_transform(src)
-        dst = self.dst_transform(dst)
+        src = transforms.functional.to_tensor(src)
+        src = transforms.functional.normalize(src, (.5,), (.5,))
 
-        # Augmentation 적용
-        if self.split == "train":
-
-            if random.random() > 0.5:
-                src = transforms.functional.hflip(src)
-                dst = transforms.functional.hflip(dst)
-
-            if random.random() > 0.5:
-                src = transforms.functional.vflip(src)
-                dst = transforms.functional.vflip(dst)
+        dst = (-target1 + target2 + 1.) * 0.5
+        dst = transforms.functional.to_tensor(dst)
+        dst = transforms.functional.normalize(dst, (0.5,), (0.5,))
 
         conditions = self.conditions[i]
         real_error = self.real_error[i]
 
-        return src, dst, conditions
+        return src, dst, conditions, real_error
 
     def __len__(self):
-
         return len(self.dst_images)
 
 

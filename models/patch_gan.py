@@ -36,14 +36,21 @@ class NLayerDiscriminator(nn.Module):
         self.features = nn.Sequential(*sequence)
         self.classifier = nn.Conv2d(ndf * nf_mult, 1, kernel_size=kw, stride=1,
                                     padding=padw)  # output 1 channel prediction map
+        self.regressor = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(63 * 63, 256),
+            nn.ReLU(),
+            nn.Linear(256, 7)
+        )
         self.sigmoid = nn.Sigmoid()
         self.use_sigmoid = use_sigmoid
 
-    def forward(self, input, cond, cond_emb):
+    def forward(self, input, cond):
         """Standard forward."""
         output = self.features(input)
         # output = output + (cond_emb * cond.unsqueeze(-1)).mean(axis=1).unsqueeze(-1).unsqueeze(-1)
+        reg_output = self.regressor(output.mean(dim=1))
         output = self.classifier(output)  # return self.model(input)
         if self.use_sigmoid:
             output = self.sigmoid(output)
-        return output
+        return output, reg_output

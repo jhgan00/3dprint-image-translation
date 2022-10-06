@@ -28,24 +28,27 @@ def train_one_epoch(G: torch.nn.Module, D: torch.nn.Module, optimG: torch.nn.Mod
         schedG.step()
         schedD.step()
 
-    for iter, (real_A, real_B, cond) in enumerate(train_loader, 1):
+    for iter, (real_A, real_B, cond, error) in enumerate(train_loader, 1):
 
         real_A = real_A.to(device).float()
         real_B = real_B.to(device).float()
         cond = cond.to(device).float()
+        error = error.to(device).float()
 
         with torch.cuda.amp.autocast():
             fake_B = G(real_A, cond)  # G(A)
             set_requires_grad(D, True)  # enable backprop for D
             optimD.zero_grad()  # set D's gradients to zero
-            fake_AB = torch.cat((real_A, fake_B),
-                                1)  # we use conditional GANs; we need to feed both input and output to the discriminator
-            pred_fake = D(fake_AB.detach(), cond, G.condition_embedding.embeddings)
+            fake_AB = torch.cat((real_A, fake_B), 1)
+            pred_fake, _ = D(fake_AB.detach(), cond)
             loss_D_fake = adv_loss(pred_fake, False)
             real_AB = torch.cat((real_A, real_B), 1)
-            pred_real = D(real_AB.detach(), cond, G.condition_embedding.embeddings)
+            pred_real, pred_error = D(real_AB.detach(), cond)
+
             loss_D_real = adv_loss(pred_real, True)
-            loss_D = (loss_D_fake + loss_D_real) * 0.5
+            loss_D_REG = torch.nn.functional.l1_loss(pred_error, error) * args.lambda_REG
+            loss_D = (loss_D_fake + loss_D_real + loss_D_REG) * 0.5
+
         loss_D.backward()
         if args.max_grad_norm:
             torch.nn.utils.clip_grad_norm_(D.parameters(), args.max_grad_norm)
@@ -56,37 +59,43 @@ def train_one_epoch(G: torch.nn.Module, D: torch.nn.Module, optimG: torch.nn.Mod
             set_requires_grad(D, False)  # D requires no gradients when optimizing G
             optimG.zero_grad()  # set G's gradients to zero
             fake_AB = torch.cat((real_A, fake_B), 1)
-            pred_fake = D(fake_AB, cond, G.condition_embedding.embeddings)
-            loss_G_GAN = adv_loss(pred_fake, True)
+            pred_fake, pred_error = D(fake_AB, cond)
+            loss_G_GAN = adv_loss(pred_fake, True) * args.lambda_GAN
             loss_G_VGG = vgg_loss(
                 fake_B * 0.5 + 0.5 , real_B * 0.5 + 0.5,
                 feature_layers=args.feature_layers,
                 style_layers=args.style_layers,
             ) * args.lambda_VGG
-            loss_G = loss_G_GAN + loss_G_VGG
-            loss_G.backward()
-            if args.max_grad_norm:
-                torch.nn.utils.clip_grad_norm_(G.parameters(), args.max_grad_norm)
-            optimG.step()  # udpate G's weights
+            loss_G_REG = torch.nn.functional.l1_loss(pred_error, error) * args.lambda_REG
+            loss_G = loss_G_GAN + loss_G_VGG + loss_G_REG
+        loss_G.backward()
+        if args.max_grad_norm:
+            torch.nn.utils.clip_grad_norm_(G.parameters(), args.max_grad_norm)
+        optimG.step()  # udpate G's weights
 
         global_step = (epoch - 1) * len(train_loader) + iter
 
         if not (iter % args.log_freq) or (iter == len(train_loader)):
             loss_G_adv = loss_G_GAN.item()
             loss_G_vgg = loss_G_VGG.item()
+            loss_G_reg = loss_G_REG.item()
+
             loss_D_real = loss_D_real.item()
             loss_D_fake = loss_D_fake.item()
+            loss_D_reg  = loss_D_REG.item()
 
             print(f"Epoch [{epoch}/{args.total_epochs}] Batch [{iter}/{len(train_loader)}] "
-                  f"G_adv: {loss_G_adv:.4f} G_vgg: {loss_G_vgg:.4f} "
-                  f"D_real: {loss_D_real:.4f} D_fake: {loss_D_fake:.4f} ")
+                  f"G_adv: {loss_G_adv:.4f} G_vgg: {loss_G_vgg:.4f} G_reg:{loss_G_reg:.4f} "
+                  f"D_real: {loss_D_real:.4f} D_fake: {loss_D_fake:.4f} D_reg: {loss_D_reg:.4f} ")
 
             log_writer.add_scalar('G/adversarial', loss_G_adv, global_step)
             log_writer.add_scalar('G/vgg', loss_G_vgg, global_step)
+            log_writer.add_scalar('G/reg', loss_G_reg, global_step)
             log_writer.add_scalar('G/lr', optimG.param_groups[0]['lr'], global_step)
 
             log_writer.add_scalar('D/real', loss_D_real, global_step)
             log_writer.add_scalar('D/fake', loss_D_fake, global_step)
+            log_writer.add_scalar('D/reg', loss_D_reg, global_step)
             log_writer.add_scalar('D/lr', optimD.param_groups[0]['lr'], global_step)
 
         if not (iter % args.display_freq):
@@ -108,7 +117,7 @@ def evaluate(G: torch.nn.Module, data_loader: torch.utils.data.DataLoader, epoch
     real_errors = []
 
     with torch.cuda.amp.autocast():
-        for src, dst, cond in data_loader:
+        for src, dst, cond, _ in data_loader:
             src = src.to(device).float()
             cond = cond.to(device).float()
             fake = G(src, cond)
