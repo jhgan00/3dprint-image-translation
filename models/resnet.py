@@ -1,3 +1,4 @@
+import math
 import torch
 from torch import nn
 import functools
@@ -134,19 +135,19 @@ class ConditionEmbedding(nn.Module):
         super().__init__()
         w = torch.empty(size=(num_vocab, embed_dim))
         nn.init.normal_(w)
-        # self.embeddings = nn.Parameter(data=w, requires_grad=True)
-        self.fc = nn.Sequential(
-            nn.Linear(num_vocab, embed_dim // 2),
-            nn.Tanh(),
-            nn.Linear(embed_dim // 2, embed_dim),
-            nn.Tanh(),
-        )
+        self.embeddings = nn.Parameter(data=w, requires_grad=True)
+        # self.fc = nn.Sequential(
+        #     nn.Linear(num_vocab, embed_dim // 2),
+        #     nn.Tanh(),
+        #     nn.Linear(embed_dim // 2, embed_dim),
+        #     nn.Tanh(),
+        # )
         self.attn = AttentionBlock(256, 1)
 
     def forward(self, x, conditions: torch.Tensor):
-        conditions = self.fc(conditions).unsqueeze(1)
+        # conditions = self.fc(conditions).unsqueeze(1)
+        conditions = self.embeddings.unsqueeze(0) * conditions.unsqueeze(-1)
         return self.attn(x, conditions)
-        # return x + (e.unsqueeze(0) * conditions.unsqueeze(-1)).mean(axis=1).unsqueeze(-1).unsqueeze(-1)
 
 
 class AttentionBlock(nn.Module):
@@ -155,7 +156,7 @@ class AttentionBlock(nn.Module):
         super().__init__()
         self.d_model = d_model
         self.nhead = nhead
-        self.attn = nn.MultiheadAttention(d_model, nhead, batch_first=True)
+        self.attn = MultiHeadAttention(d_model, nhead)
         self.norm = nn.LayerNorm([d_model, 128, 128])
 
     def forward(self, x, cond):
@@ -166,6 +167,84 @@ class AttentionBlock(nn.Module):
         """
         batch_size = x.size(0)
         res = x.view(batch_size, -1, self.d_model)
-        res, _ = self.attn(res, cond, cond)
+        res = self.attn(res, cond, cond)
         res = res.reshape(*x.shape)
         return self.norm(x + res)
+
+
+class ScaleDotProductAttention(nn.Module):
+    """
+    compute scale dot product attention
+    Query : given sentence that we focused on (decoder)
+    Key : every sentence to check relationship with Qeury(encoder)
+    Value : every sentence same with Key (encoder)
+    """
+
+    def __init__(self):
+        super(ScaleDotProductAttention, self).__init__()
+        self.softmax = nn.Softmax(dim=-1)
+
+    def forward(self, q, k, v, mask=None, e=1e-12):
+        # input is 4 dimension tensor
+        # [batch_size, head, length, d_tensor]
+        batch_size, head, length, d_tensor = k.size()
+
+        # 1. dot product Query with Key^T to compute similarity
+        k_t = k.transpose(2, 3)  # transpose
+        score = (q @ k_t) / math.sqrt(d_tensor)  # scaled dot product
+
+        # 3. pass them softmax to make [0, 1] range
+        score = F.sigmoid(score)
+
+        # 4. multiply with Value
+        v = score @ v
+
+        return v, score
+
+
+class MultiHeadAttention(nn.Module):
+
+    def __init__(self, d_model, n_heads):
+        super(MultiHeadAttention, self).__init__()
+        self.n_heads = n_heads
+        self.attention = ScaleDotProductAttention()
+        self.w_q = nn.Linear(d_model, d_model)
+        self.w_k = nn.Linear(d_model, d_model)
+        self.w_v = nn.Linear(d_model, d_model)
+        self.w_concat = nn.Linear(d_model, d_model)
+
+    def forward(self, q, k, v):
+
+        q, k, v = self.w_q(q), self.w_k(k), self.w_v(v)
+        q, k, v = self.split(q), self.split(k), self.split(v)
+        out, attention = self.attention(q, k, v)
+        out = self.concat(out)
+        out = self.w_concat(out)
+
+        return out
+
+    def split(self, tensor):
+        """
+        split tensor by number of head
+        :param tensor: [batch_size, length, d_model]
+        :return: [batch_size, head, length, d_tensor]
+        """
+        batch_size, length, d_model = tensor.size()
+
+        d_tensor = d_model // self.n_heads
+        tensor = tensor.view(batch_size, length, self.n_heads, d_tensor).transpose(1, 2)
+        # it is similar with group convolution (split by number of heads)
+
+        return tensor
+
+    def concat(self, tensor):
+        """
+        inverse function of self.split(tensor : torch.Tensor)
+        :param tensor: [batch_size, head, length, d_tensor]
+        :return: [batch_size, length, d_model]
+        """
+        batch_size, head, length, d_tensor = tensor.size()
+        d_model = head * d_tensor
+
+        tensor = tensor.transpose(1, 2).contiguous().view(batch_size, length, d_model)
+        return tensor

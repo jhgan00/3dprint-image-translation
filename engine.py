@@ -60,7 +60,7 @@ def train_one_epoch(G: torch.nn.Module, D: torch.nn.Module, optimG: torch.nn.Mod
             optimG.zero_grad()  # set G's gradients to zero
             fake_AB = torch.cat((real_A, fake_B), 1)
             pred_fake, pred_error = D(fake_AB, cond)
-            loss_G_GAN = adv_loss(pred_fake, True) * args.lambda_GAN
+            loss_G_GAN = adv_loss(pred_fake, True)
             loss_G_VGG = vgg_loss(
                 fake_B * 0.5 + 0.5 , real_B * 0.5 + 0.5,
                 feature_layers=args.feature_layers,

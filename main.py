@@ -22,6 +22,7 @@ def get_args():
                         help='the type of GAN objective. [vanilla| lsgan | wgangp]. vanilla GAN loss is the cross-entropy objective used in the original GAN paper.')
     parser.add_argument('--lambda_VGG', type=float, default=100.,
                         help='weight for the content(VGG) loss (originally proposed in SRGAN)')
+    parser.add_argument('--lambda_REG', type=float, default=100)
     parser.add_argument('--feature_layers', type=int, nargs="+", default=[0, 1, 2, 3])
     parser.add_argument('--style_layers', type=int, nargs="+", default=[])
     parser.add_argument('--max_grad_norm', type=float, default=0.0)
@@ -46,7 +47,7 @@ def get_args():
                         help='scaling factor for normal, xavier and orthogonal.')
 
     # dataset parameters
-    parser.add_argument('--dataset', type=str, default='fdm-gray', choices=['fdm-gray', 'hdjoong'])
+    parser.add_argument('--dataset', type=str, default='fdm-gray', choices=['fdm-gray', 'fdm-color', 'hdjoong'])
     parser.add_argument('--src_dir', type=str, default='./data/tdp-fdm/Blueprint')
     parser.add_argument('--dst_dir', type=str, default='./data/tdp-fdm/Mash')
     parser.add_argument('--csv_fpath', type=str, default='./data/tdp-fdm/Metadata/data.csv')
@@ -138,7 +139,7 @@ def main(args):
     # train pix2pix
     best_fid = np.inf
     best_pixel_loss = np.inf
-
+    epoch = 1
     for epoch in range(1, args.total_epochs + 1):
 
         train_one_epoch(
@@ -175,7 +176,7 @@ def main(args):
 
     save_path = os.path.join(args.checkpoint_dir, f'checkpoint.best.pixel_loss.pth')
     netG.load_state_dict(torch.load(save_path))
-    evaluate(netG, test_loader, args.n_epochs, device, 'test', log_writer, args)
+    evaluate(netG, test_loader, epoch, device, 'test', log_writer, args)
 
 
 if __name__ == "__main__":

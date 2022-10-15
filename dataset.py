@@ -94,7 +94,7 @@ class FDMDataset(Dataset):
         df = pd.read_csv(csv_fpath, encoding='utf-8-sig').query(f"split=='{split}'")
         self.src_images = df['src'].values
         self.dst_images = df['dst'].values
-        self.conditions = df.iloc[:, 2:-8].values
+        self.conditions = df.iloc[:, 2:-7].values
         self.real_error = MinMaxScaler().fit_transform(df.iloc[:, -8:-1].values)
 
         self.src_dir = src_dir
@@ -123,12 +123,15 @@ class FDMDataset(Dataset):
             target1 = np.where(b > 1, 1., 0.)
             target2 = np.where(r > 1, 1., 0.)
             dst = (-target1 + target2 + 1.) * 0.5
+            dst = transforms.functional.to_tensor(dst)
+            dst = transforms.functional.normalize(dst, (0.5,), (0.5,))
+
+        else:
+            dst = transforms.functional.to_tensor(dst)
+            dst = transforms.functional.normalize(dst, (0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
 
         src = transforms.functional.to_tensor(src)
         src = transforms.functional.normalize(src, (.5,), (.5,))
-
-        dst = transforms.functional.to_tensor(dst)
-        dst = transforms.functional.normalize(dst, (0.5,), (0.5,))
 
         conditions = self.conditions[i]
         real_error = self.real_error[i]

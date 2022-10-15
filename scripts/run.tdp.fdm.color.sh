@@ -1,23 +1,27 @@
-DATASET="tdp-fdm-color"
+DATASET="fdm-color"
 python main.py \
 --dataset $DATASET \
---n_epochs 50 \
---n_epochs_decay 100 \
+--n_epochs 100 \
+--n_epochs_decay 200 \
 --input_nc 1 \
 --output_nc 3 \
---n_layers_D 2 \
 --batch_size 4 \
+--n_layers_G 9 \
+--n_layers_D 3 \
 --ndf 32 \
---dataset "tdp-color" \
+--dataset "fdm-color" \
 --src_dir "./data/tdp-fdm/Blueprint" \
 --dst_dir "./data/tdp-fdm/Mash" \
---csv_fpath "./data/tdp-fdm/Metadata/data.csv" \
---lr_decay_iters 25 \
+--csv_fpath "./data/tdp-fdm/Metadata/data.fdm.latest.csv" \
+--lr_decay_iters 50 \
 --output_dir ./experiments/$DATASET/outputs \
 --log_dir ./experiments/$DATASET/logs \
 --checkpoint_dir ./experiments/$DATASET/checkpoints \
 --dropout 0.5 \
---expr_name nld-2-ndf-32-vgg-100-bs-4-inpsize-512-gc-1 \
---max_grad_norm 1. \
+--expr_name strainreg-vgg-1000-reg-100-gc-0-fl-0123-fix-atten \
+--lambda_VGG 1000 \
+--lambda_REG 100 \
+--max_grad_norm 0. \
 --input_size 512 512 \
---lambda_VGG 100
+--feature_layers 0 1 2 3 \
+--device cuda:2
