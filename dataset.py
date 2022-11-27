@@ -95,7 +95,7 @@ class FDMDataset(Dataset):
         self.src_images = df['src'].values
         self.dst_images = df['dst'].values
         self.conditions = df.iloc[:, 2:-7].values
-        self.real_error = MinMaxScaler().fit_transform(df.iloc[:, -8:-1].values)
+        self.real_error = MinMaxScaler().fit_transform(df.iloc[:, -7:-1].values)
 
         self.src_dir = src_dir
         self.dst_dir = dst_dir
@@ -109,7 +109,7 @@ class FDMDataset(Dataset):
         dst_fpath = os.path.join(self.dst_dir, self.dst_images[i])
 
         src = Image.open(src_fpath).convert("L")
-        dst = Image.open(dst_fpath)
+        dst = Image.open(dst_fpath).convert("RGB")
         dst = dst.resize(size=src.size)
 
         src = resize_and_pad(src, self.input_size)
@@ -145,17 +145,6 @@ class FDMDataset(Dataset):
 
 class SLADataset(Dataset):
 
-    l_lo = np.array([0, 0, 0])  # 도면 라인 추정
-    l_hi = np.array([179, 255, 150])
-    g_lo = np.array([40, 20, 100])  # 공차범위 내
-    g_hi = np.array([89, 255, 255])
-    b_lo = np.array([90, 20, 100])  # 수축
-    b_hi = np.array([139, 255, 255])
-    ry_lo = np.array([0, 20, 100])  # 팽창
-    ry_hi = np.array([39, 255, 255])
-    rp_lo = np.array([140, 20, 100])
-    rp_hi = np.array([179, 255, 255])
-
     def __init__(self, src_dir, dst_dir, csv_fpath, input_size, split, dst_grayscale=True):
         """도면 이미지, 출력 이미지, 프린터 파라미터, 변형률 정보"""
 
@@ -163,7 +152,7 @@ class SLADataset(Dataset):
         self.src_images = df['src'].values
         self.dst_images = df['dst'].values
         self.conditions = df.iloc[:, 2:-8].values
-        self.real_error = MinMaxScaler().fit_transform(df.iloc[:, -8:-1].values)
+        self.real_error = df.iloc[:, -8:-2].values
 
         self.src_dir = src_dir
         self.dst_dir = dst_dir
@@ -182,19 +171,11 @@ class SLADataset(Dataset):
         src = resize_and_pad(src, self.input_size)
         dst = resize_and_pad(dst, self.input_size)
 
-        dst = cv2.cvtColor(np.array(dst), cv2.COLOR_BGR2HSV)
-        b = cv2.inRange(dst, FDMDataset.b_lo, FDMDataset.b_hi)
-        r = cv2.inRange(dst, FDMDataset.ry_lo, FDMDataset.ry_hi) + cv2.inRange(dst, FDMDataset.rp_lo, FDMDataset.rp_hi)
-
-        target1 = np.where(b > 1, 1., 0.)
-        target2 = np.where(r > 1, 1., 0.)
+        dst = transforms.functional.to_tensor(dst)
+        dst = transforms.functional.normalize(dst, (0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
 
         src = transforms.functional.to_tensor(src)
         src = transforms.functional.normalize(src, (.5,), (.5,))
-
-        dst = (-target1 + target2 + 1.) * 0.5
-        dst = transforms.functional.to_tensor(dst)
-        dst = transforms.functional.normalize(dst, (0.5,), (0.5,))
 
         conditions = self.conditions[i]
         real_error = self.real_error[i]

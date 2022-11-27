@@ -10,18 +10,18 @@ python main.py \
 --n_layers_D 3 \
 --ndf 32 \
 --dataset "fdm-color" \
---src_dir "./data/tdp-fdm/Blueprint" \
---dst_dir "./data/tdp-fdm/Mash" \
---csv_fpath "./data/tdp-fdm/Metadata/data.fdm.latest.csv" \
+--src_dir "./data/g-fdm/Blueprint" \
+--dst_dir "./data/g-fdm/Mash" \
+--csv_fpath "./data/g-fdm/Metadata/data.G-FDM.csv" \
 --lr_decay_iters 50 \
 --output_dir ./experiments/$DATASET/outputs \
 --log_dir ./experiments/$DATASET/logs \
 --checkpoint_dir ./experiments/$DATASET/checkpoints \
 --dropout 0.5 \
---expr_name strainreg-vgg-1000-reg-100-gc-0-fl-0123-fix-atten \
+--expr_name G-FDM-50 \
 --lambda_VGG 1000 \
 --lambda_REG 100 \
 --max_grad_norm 0. \
 --input_size 512 512 \
 --feature_layers 0 1 2 3 \
---device cuda:2
+--device cuda:3

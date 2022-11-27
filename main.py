@@ -6,6 +6,7 @@ from datetime import datetime
 import numpy as np
 import torch
 from torch.optim.lr_scheduler import StepLR
+from torch.cuda.amp import GradScaler
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
@@ -47,10 +48,10 @@ def get_args():
                         help='scaling factor for normal, xavier and orthogonal.')
 
     # dataset parameters
-    parser.add_argument('--dataset', type=str, default='fdm-gray', choices=['fdm-gray', 'fdm-color', 'hdjoong'])
-    parser.add_argument('--src_dir', type=str, default='./data/tdp-fdm/Blueprint')
-    parser.add_argument('--dst_dir', type=str, default='./data/tdp-fdm/Mash')
-    parser.add_argument('--csv_fpath', type=str, default='./data/tdp-fdm/Metadata/data.csv')
+    parser.add_argument('--dataset', type=str, default='sla-color', choices=['sla-color', 'fdm-color', 'hdjoong'])
+    parser.add_argument('--src_dir', type=str, default='./data/tdp-sla/Blueprint')
+    parser.add_argument('--dst_dir', type=str, default='./data/tdp-sla/Mash')
+    parser.add_argument('--csv_fpath', type=str, default='./data/tdp-sla/Metadata/data.SLA.csv')
     parser.add_argument('--num_threads', default=4, type=int, help='# threads for loading data')
     parser.add_argument('--batch_size', type=int, default=1, help='input batch size')
     parser.add_argument('--input_size', type=int, default=[512, 512], nargs="+", help='input size. empty for no resizing')
@@ -97,6 +98,7 @@ def main(args):
     print("=" * 80)
 
     device = torch.device(args.device)
+    torch.cuda.set_device(device)
 
     # fix the seed for reproducibility
     torch.manual_seed(args.seed)
@@ -132,6 +134,9 @@ def main(args):
     scheduler_G = StepLR(optimizer_G, step_size=args.lr_decay_iters)
     scheduler_D = StepLR(optimizer_D, step_size=args.lr_decay_iters)
 
+    scaler_G = GradScaler()
+    scaler_D = GradScaler()
+
     # get tensorboard log writer
     if args.log_dir is not None:
         log_writer = SummaryWriter(args.log_dir)
@@ -149,6 +154,8 @@ def main(args):
             optimizer_D,
             scheduler_G,
             scheduler_D,
+            scaler_G,
+            scaler_D,
             criterionGAN,
             criterionVGG,
             train_loader,
@@ -157,6 +164,8 @@ def main(args):
             log_writer,
             args
         )
+
+        torch.cuda.empty_cache()
 
         eval_dict = evaluate(netG, valid_loader, epoch, device, 'valid', log_writer, args)
 

@@ -27,7 +27,8 @@ def get_model(num_embeddings, args):
         netG = AttentionalResnetGenerator(args.input_nc, args.output_nc, num_embeddings, args.ngf, norm_layer=norm_layer,
                                           dropout=args.dropout, n_blocks=args.n_layers_G, n_heads=args.n_heads)
 
-    netD = NLayerDiscriminator(input_nc=args.input_nc + args.output_nc, ndf=args.ndf, n_layers=args.n_layers_D)
+    norm_layer = get_norm_layer(args.norm_type)
+    netD = NLayerDiscriminator(input_nc=args.input_nc + args.output_nc, ndf=args.ndf, norm_layer=norm_layer, n_layers=args.n_layers_D)
 
     init_weights(netG, args.init_type, args.init_gain)
     init_weights(netD, args.init_type, args.init_gain)

@@ -3,7 +3,7 @@ import torch
 import numpy as np
 from torchvision.utils import make_grid, save_image
 from pytorch_fid.fid_score import calculate_fid_given_paths
-from metric import mean_pixel_loss
+from metric import mean_pixel_loss, pixel_loss_with_mask
 from typing import Dict
 
 
@@ -17,7 +17,7 @@ def set_requires_grad(nets, requires_grad=False):
 
 
 def train_one_epoch(G: torch.nn.Module, D: torch.nn.Module, optimG: torch.nn.Module, optimD: torch.nn.Module,
-                    schedG, schedD,
+                    schedG, schedD, scalerG, scalerD,
                     adv_loss, vgg_loss, train_loader: torch.utils.data.DataLoader, epoch: int,
                     device: torch.device, log_writer: torch.utils.tensorboard.SummaryWriter, args):
 
@@ -49,15 +49,14 @@ def train_one_epoch(G: torch.nn.Module, D: torch.nn.Module, optimG: torch.nn.Mod
             loss_D_REG = torch.nn.functional.l1_loss(pred_error, error) * args.lambda_REG
             loss_D = (loss_D_fake + loss_D_real + loss_D_REG) * 0.5
 
-        loss_D.backward()
-        if args.max_grad_norm:
-            torch.nn.utils.clip_grad_norm_(D.parameters(), args.max_grad_norm)
-        optimD.step()  # update D's weights
+        optimD.zero_grad()
+        scalerD.scale(loss_D).backward()
+        scalerD.step(optimD)
+        scalerD.update()
 
         with torch.cuda.amp.autocast():
             # update G
             set_requires_grad(D, False)  # D requires no gradients when optimizing G
-            optimG.zero_grad()  # set G's gradients to zero
             fake_AB = torch.cat((real_A, fake_B), 1)
             pred_fake, pred_error = D(fake_AB, cond)
             loss_G_GAN = adv_loss(pred_fake, True)
@@ -68,10 +67,11 @@ def train_one_epoch(G: torch.nn.Module, D: torch.nn.Module, optimG: torch.nn.Mod
             ) * args.lambda_VGG
             loss_G_REG = torch.nn.functional.l1_loss(pred_error, error) * args.lambda_REG
             loss_G = loss_G_GAN + loss_G_VGG + loss_G_REG
-        loss_G.backward()
-        if args.max_grad_norm:
-            torch.nn.utils.clip_grad_norm_(G.parameters(), args.max_grad_norm)
-        optimG.step()  # udpate G's weights
+
+        optimG.zero_grad()
+        scalerG.scale(loss_G).backward()
+        scalerG.step(optimG)
+        scalerG.update()
 
         global_step = (epoch - 1) * len(train_loader) + iter
 
@@ -114,7 +114,6 @@ def evaluate(G: torch.nn.Module, data_loader: torch.utils.data.DataLoader, epoch
     G.eval()
     real_images = []
     fake_images = []
-    real_errors = []
 
     with torch.cuda.amp.autocast():
         for src, dst, cond, _ in data_loader:
@@ -122,12 +121,12 @@ def evaluate(G: torch.nn.Module, data_loader: torch.utils.data.DataLoader, epoch
             cond = cond.to(device).float()
             fake = G(src, cond)
 
-            real_images.append(dst.detach())
-            fake_images.append(fake.detach())
-            # real_errors.append(real_error.float().detach())
+            real_images.append(dst.detach().cpu())
+            fake_images.append(fake.detach().cpu())
 
-    real_images = torch.cat(real_images) * 0.5 + 0.5
-    fake_images = torch.cat(fake_images) * 0.5 + 0.5
+    torch.cuda.empty_cache()
+    real_images = torch.cat(real_images).type(torch.float32) * 0.5 + 0.5
+    fake_images = torch.cat(fake_images).type(torch.float32) * 0.5 + 0.5
     sample_idx = np.arange(real_images.size(0))
     np.random.shuffle(sample_idx)
     sample_idx = sample_idx[:16]
@@ -150,7 +149,7 @@ def evaluate(G: torch.nn.Module, data_loader: torch.utils.data.DataLoader, epoch
         args.num_threads
     )
 
-    pixel_loss = mean_pixel_loss((fake_images - 0.5) / 0.5, (real_images - 0.5) / 0.5, device=device)
+    pixel_loss = pixel_loss_with_mask((fake_images - 0.5) / 0.5, (real_images - 0.5) / 0.5, device="cpu")
 
     log_writer.add_scalar(f'{split}/FID', fid_value, global_step=epoch)
     log_writer.add_scalar(f'{split}/Pixel Loss', pixel_loss, global_step=epoch)

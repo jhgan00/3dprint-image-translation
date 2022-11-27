@@ -65,6 +65,36 @@ def mean_pixel_loss(pred, true, device='cpu'):
     return (pred - true).abs().sum(dim=list(range(1, len(pred.shape)))).mean()
 
 
+def pixel_loss_with_mask(pred, true, device='cpu', sensitivity=15):
+    """
+    :param pred: torch.Tensor (N x C x H x W), -1 ~ 1
+    :param true: torch.Tensor (N x C x H x W), -1 ~ 1
+    :return: 픽셀 로스
+    """
+    import cv2
+
+    assert pred.shape == true.shape
+    pred = pred.to(device).type(torch.float32)
+    true = true.to(device).type(torch.float32)
+
+    masks = []
+    imgs = true * 0.5 + 0.5
+    imgs *= 255
+    imgs = imgs.detach().cpu().numpy().transpose(0, 2, 3, 1).astype(np.uint8)  # N x H x W x C
+    for x in imgs:
+        x = cv2.cvtColor(x, cv2.COLOR_RGB2HSV)
+        lower = np.array([0, 0, 255 - sensitivity])
+        upper = np.array([255, sensitivity, 255])
+        mask = cv2.inRange(x, lower, upper)  # H x W
+        masks.append(mask)
+
+    masks = np.stack(masks)  # N x H x W
+    masks = (masks == 0).astype(int)
+    masks = torch.Tensor(masks).to(device).unsqueeze(1)  # N x 1 x H x W
+
+    return ((pred - true) * masks).abs().sum(dim=(1, 2, 3)).mean().item()
+
+
 class ScoreMetric:
 
     def __init__(self):
