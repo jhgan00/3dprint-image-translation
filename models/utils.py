@@ -5,6 +5,9 @@ from models.unet import UNetGenerator
 from models.resnet import ResnetGenerator
 from models.attn_resnet import AttentionalResnetGenerator
 from models.patch_gan import NLayerDiscriminator
+from models.zip_net import ZipUNet
+from models.zip_resnet import ZipBlockResNet
+from models.zip_block import ZipBlock
 
 
 class Identity(nn.Module):
@@ -21,14 +24,35 @@ def get_model(num_embeddings, args):
     elif args.netG == 'resnet':
         norm_layer = get_norm_layer(args.norm_type)
         netG = ResnetGenerator(args.input_nc, args.output_nc, num_embeddings, args.ngf, norm_layer=norm_layer,
-                               dropout=args.dropout, n_blocks=args.n_layers_G)
+                               dropout=args.dropout_D, n_blocks=args.n_layers_G)
+    elif args.netG == 'zip_unet':
+        norm_layer = get_norm_layer(args.norm_type)
+        netG = ZipUNet(
+            args.input_nc, args.output_nc, num_downs=args.n_layers_G, c_dim=num_embeddings, ngf=args.ngf, norm_layer=norm_layer,
+            dropout=args.dropout_G
+        )
+
+    elif args.netG == 'zip_resnet':
+        norm_layer = get_norm_layer(args.norm_type)
+        netG = ZipBlockResNet(
+            args.input_nc, args.output_nc, n_blocks=args.n_layers_G, c_dim=num_embeddings, ngf=args.ngf, norm_layer=norm_layer,
+            dropout=args.dropout_G
+        )
+
+    elif args.netG == 'zip_block':
+        norm_layer = get_norm_layer(args.norm_type)
+        netG = ZipBlock(
+            args.input_nc, args.output_nc, n_blocks=args.n_layers_G, c_dim=num_embeddings, ngf=args.ngf, norm_layer=norm_layer,
+            dropout=args.dropout_G
+        )
+
     else:
         norm_layer = get_norm_layer(args.norm_type)
         netG = AttentionalResnetGenerator(args.input_nc, args.output_nc, num_embeddings, args.ngf, norm_layer=norm_layer,
-                                          dropout=args.dropout, n_blocks=args.n_layers_G, n_heads=args.n_heads)
+                                          dropout=args.dropout_G, n_blocks=args.n_layers_G, n_heads=args.n_heads)
 
     norm_layer = get_norm_layer(args.norm_type)
-    netD = NLayerDiscriminator(input_nc=args.input_nc + args.output_nc, ndf=args.ndf, norm_layer=norm_layer, n_layers=args.n_layers_D)
+    netD = NLayerDiscriminator(input_nc=args.input_nc + args.output_nc, n_regs=args.n_regs, ndf=args.ndf, norm_layer=norm_layer, n_layers=args.n_layers_D)
 
     init_weights(netG, args.init_type, args.init_gain)
     init_weights(netD, args.init_type, args.init_gain)

@@ -4,7 +4,7 @@ from torch import nn
 class NLayerDiscriminator(nn.Module):
     """Defines a PatchGAN discriminator"""
 
-    def __init__(self, input_nc, ndf=64, n_layers=3, norm_layer=nn.BatchNorm2d, use_sigmoid=False):
+    def __init__(self, input_nc, n_regs, ndf=64, n_layers=3, norm_layer=nn.BatchNorm2d, use_sigmoid=False):
         """Construct a PatchGAN discriminator
 
         Parameters:
@@ -23,7 +23,8 @@ class NLayerDiscriminator(nn.Module):
             nf_mult_prev = nf_mult
             nf_mult = min(2 ** n, 8)
             sequence += [
-                nn.Conv2d(ndf * nf_mult_prev, ndf * nf_mult, kernel_size=kw, stride=2, padding=padw, bias=True),
+                nn.Conv2d(ndf
+                          * nf_mult_prev, ndf * nf_mult, kernel_size=kw, stride=2, padding=padw, bias=True),
                 norm_layer(ndf * nf_mult), nn.LeakyReLU(0.2, True)]
 
         nf_mult_prev = nf_mult
@@ -40,7 +41,7 @@ class NLayerDiscriminator(nn.Module):
             nn.Flatten(),
             nn.Linear(256, 128),
             nn.ReLU(),
-            nn.Linear(128, 6)
+            nn.Linear(128, n_regs)
         )
         self.sigmoid = nn.Sigmoid()
         self.use_sigmoid = use_sigmoid

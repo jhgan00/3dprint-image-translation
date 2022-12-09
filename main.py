@@ -30,9 +30,10 @@ def get_args():
     parser.add_argument('--smoothing', type=float, default=0.1)
 
     # model parameters
-    parser.add_argument('--netG', type=str, default='resnet', choices=['attn', 'unet', 'resnet'])
+    parser.add_argument('--netG', type=str, default='resnet', choices=['unet', 'resnet', 'zip_resnet', 'zip_unet', 'zip_block'])
     parser.add_argument('--norm_type', default='instance', type=str, choices=['batch', 'instance', 'none'])
-    parser.add_argument('--dropout', default=0.5, type=float)
+    parser.add_argument('--dropout-D', default=0.5, type=float)
+    parser.add_argument('--dropout-G', default=0.5, type=float)
     parser.add_argument('--input_nc', type=int, default=1,
                         help='# of input image channels: 3 for RGB and 1 for grayscale')
     parser.add_argument('--output_nc', type=int, default=1,
@@ -42,6 +43,7 @@ def get_args():
     parser.add_argument('--n_heads', type=int, default=4)
     parser.add_argument('--n_layers_G', type=int, default=9, help='only used if netD==n_layers')
     parser.add_argument('--n_layers_D', type=int, default=2, help='only used if netD==n_layers')
+    parser.add_argument('--n-regs', type=int, default=6, help='number of regression targets')
     parser.add_argument('--init_type', type=str, default='normal',
                         help='network initialization [normal | xavier | kaiming | orthogonal]')
     parser.add_argument('--init_gain', type=float, default=0.02,
@@ -61,6 +63,8 @@ def get_args():
     parser.add_argument('--n_epochs_decay', type=int, default=100,
                         help='number of epochs with the initial learning rate')
     parser.add_argument('--beta1', type=float, default=0.5, help='momentum term of adam')
+    parser.add_argument('--weight_decay_G', type=float, default=1e-5)
+    parser.add_argument('--weight_decay_D', type=float, default=1e-5)
     parser.add_argument('--lr', type=float, default=1e-4, help='initial learning rate for adam')
     parser.add_argument('--lr_decay_iters', type=int, default=25)
 
@@ -128,8 +132,8 @@ def main(args):
     netG.to(device)
     netD.to(device)
 
-    optimizer_G = torch.optim.Adam(netG.parameters(), lr=args.lr, betas=(args.beta1, 0.999))
-    optimizer_D = torch.optim.Adam(netD.parameters(), lr=args.lr, betas=(args.beta1, 0.999))
+    optimizer_G = torch.optim.Adam(netG.parameters(), lr=args.lr, betas=(args.beta1, 0.999), weight_decay=args.weight_decay_G)
+    optimizer_D = torch.optim.Adam(netD.parameters(), lr=args.lr, betas=(args.beta1, 0.999), weight_decay=args.weight_decay_D)
 
     scheduler_G = StepLR(optimizer_G, step_size=args.lr_decay_iters)
     scheduler_D = StepLR(optimizer_D, step_size=args.lr_decay_iters)

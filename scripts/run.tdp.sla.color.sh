@@ -1,0 +1,27 @@
+DATASET="sla-color"
+python main.py \
+--dataset $DATASET \
+--n_epochs 100 \
+--n_epochs_decay 200 \
+--input_nc 1 \
+--output_nc 3 \
+--batch_size 4 \
+--n_layers_G 9 \
+--n_layers_D 3 \
+--ndf 32 \
+--dataset "sla-color" \
+--src_dir "./data/tdp-sla/Blueprint" \
+--dst_dir "./data/tdp-sla/Mash" \
+--csv_fpath "./data/tdp-sla/Metadata/data.SLA.csv" \
+--lr_decay_iters 50 \
+--output_dir ./experiments/$DATASET/outputs \
+--log_dir ./experiments/$DATASET/logs \
+--checkpoint_dir ./experiments/$DATASET/checkpoints \
+--dropout 0.5 \
+--expr_name vgg-1000-reg-100-gc-0-fl-0123-fix-regy-GAP \
+--lambda_VGG 1000 \
+--lambda_REG 100 \
+--max_grad_norm 0. \
+--input_size 512 512 \
+--feature_layers 0 1 2 3 \
+--device cuda:2

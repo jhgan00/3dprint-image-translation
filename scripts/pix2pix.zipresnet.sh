@@ -1,5 +1,6 @@
 DATASET="fdm-color"
 python main.py \
+--netG zip_resnet \
 --dataset $DATASET \
 --n_epochs 50 \
 --n_epochs_decay 100 \
@@ -19,13 +20,13 @@ python main.py \
 --checkpoint_dir ./experiments/$DATASET/checkpoints \
 --dropout-D 0.75 \
 --dropout-G 0.5 \
---expr_name G-FDM-decay \
+--expr_name ZipBlockResNet \
 --lambda_VGG 10 \
 --lambda_REG 1 \
 --max_grad_norm 0. \
 --input_size 512 512 \
 --feature_layers 0 1 2 3 \
---device cuda:2 \
+--device cuda:1 \
 --weight_decay_G 1e-4 \
 --weight_decay_D 1e-2
 

@@ -36,7 +36,6 @@ class ResnetGenerator(nn.Module):
             down += [nn.Conv2d(ngf * mult, ngf * mult * 2, kernel_size=3, stride=2, padding=1, bias=use_bias),
                       norm_layer(ngf * mult * 2),
                       nn.ReLU(True),
-                     # nn.Dropout2d(0.5), # 07/19 customization: 드랍아웃 추가
                      ]
 
         res = []
@@ -62,11 +61,13 @@ class ResnetGenerator(nn.Module):
         self.res = nn.Sequential(*res)
         self.up = nn.Sequential(*up)
         self.condition_embedding = ConditionEmbedding(num_embeddings, 256)
+        self.position_embedding = PositionEmbedding(256)
 
     def forward(self, x, cond):
         """Standard forward w/ condition embeddings"""
         x = self.down(x)
-        x = self.condition_embedding(x, cond)
+        x = self.position_embedding(x)
+        x = self.condition_embedding(x, cond)  # convnet feature - printer parameter attention
         x = self.res(x)
         x = self.up(x)
         return x
@@ -136,16 +137,9 @@ class ConditionEmbedding(nn.Module):
         w = torch.empty(size=(num_vocab, embed_dim))
         nn.init.normal_(w)
         self.embeddings = nn.Parameter(data=w, requires_grad=True)
-        # self.fc = nn.Sequential(
-        #     nn.Linear(num_vocab, embed_dim // 2),
-        #     nn.Tanh(),
-        #     nn.Linear(embed_dim // 2, embed_dim),
-        #     nn.Tanh(),
-        # )
         self.attn = AttentionBlock(256, 1)
 
-    def forward(self, x, conditions: torch.Tensor):
-        # conditions = self.fc(conditions).unsqueeze(1)
+    def forward(self, x: torch.Tensor, conditions: torch.Tensor):
         conditions = self.embeddings.unsqueeze(0) * conditions.unsqueeze(-1)
         return self.attn(x, conditions)
 
@@ -248,3 +242,13 @@ class MultiHeadAttention(nn.Module):
 
         tensor = tensor.transpose(1, 2).contiguous().view(batch_size, length, d_model)
         return tensor
+
+
+class PositionEmbedding(nn.Module):
+
+    def __init__(self, d_model):
+        super().__init__()
+        self.embedding = nn.Parameter(data=torch.normal(0, 1e-2, (d_model, 128, 128)), requires_grad=True)
+
+    def forward(self, x):
+        return x + self.embedding
