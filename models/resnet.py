@@ -7,7 +7,7 @@ import torch.nn.functional as F
 
 class ResnetGenerator(nn.Module):
 
-    def __init__(self, input_nc, output_nc, num_embeddings, ngf=64, norm_layer=nn.BatchNorm2d, dropout=0.0, n_blocks=6, padding_type='reflect'):
+    def __init__(self, input_nc, output_nc, num_embeddings, ngf=64, norm_layer=nn.BatchNorm2d, dropout=0.0, n_blocks=6, num_heads=1, padding_type='reflect'):
         """Construct a Resnet-based generator
         Parameters:
             input_nc (int)      -- the number of channels in input images
@@ -60,7 +60,7 @@ class ResnetGenerator(nn.Module):
         self.down = nn.Sequential(*down)
         self.res = nn.Sequential(*res)
         self.up = nn.Sequential(*up)
-        self.condition_embedding = ConditionEmbedding(num_embeddings, 256)
+        self.condition_embedding = ConditionEmbedding(num_embeddings, 256, num_heads)
         self.position_embedding = PositionEmbedding(256)
 
     def forward(self, x, cond):
@@ -132,12 +132,12 @@ class ResnetBlock(nn.Module):
 
 class ConditionEmbedding(nn.Module):
 
-    def __init__(self, num_vocab: int, embed_dim: int):
+    def __init__(self, num_vocab: int, embed_dim: int, num_heads: int):
         super().__init__()
         w = torch.empty(size=(num_vocab, embed_dim))
         nn.init.normal_(w)
         self.embeddings = nn.Parameter(data=w, requires_grad=True)
-        self.attn = AttentionBlock(256, 1)
+        self.attn = AttentionBlock(embed_dim, num_heads)
 
     def forward(self, x: torch.Tensor, conditions: torch.Tensor):
         conditions = self.embeddings.unsqueeze(0) * conditions.unsqueeze(-1)
@@ -160,9 +160,11 @@ class AttentionBlock(nn.Module):
         :return:
         """
         batch_size = x.size(0)
-        res = x.view(batch_size, -1, self.d_model)
+        # res = x.view(batch_size, -1, self.d_model)
+        res = x.view(batch_size, self.d_model, -1).transpose(1, 2)  # batch x d_model x seq_len
         res = self.attn(res, cond, cond)
-        res = res.reshape(*x.shape)
+        # res = res.reshape(*x.shape)
+        res = res.transpose(1, 2).reshape(*x.shape)
         return self.norm(x + res)
 
 
@@ -188,7 +190,8 @@ class ScaleDotProductAttention(nn.Module):
         score = (q @ k_t) / math.sqrt(d_tensor)  # scaled dot product
 
         # 3. pass them softmax to make [0, 1] range
-        score = F.sigmoid(score)
+        # score = F.sigmoid(score)
+        score = self.softmax(score)
 
         # 4. multiply with Value
         v = score @ v
