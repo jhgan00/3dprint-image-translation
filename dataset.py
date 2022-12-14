@@ -94,8 +94,8 @@ class FDMDataset(Dataset):
         df = pd.read_csv(csv_fpath, encoding='utf-8-sig').query(f"split=='{split}'")
         self.src_images = df['src'].values
         self.dst_images = df['dst'].values
-        self.conditions = df.iloc[:, 2:-7].values
-        self.real_error = MinMaxScaler().fit_transform(df.iloc[:, -7:-1].values)
+        self.conditions = df.iloc[:, 2:-8].values
+        self.real_error = MinMaxScaler().fit_transform(df.iloc[:, -8:-2].values)
 
         self.src_dir = src_dir
         self.dst_dir = dst_dir
