@@ -1,11 +1,9 @@
 import os
-import random
 from typing import Tuple
 
-import cv2
 import numpy as np
 import pandas as pd
-from PIL import Image, ImageOps
+from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
 from sklearn.preprocessing import MinMaxScaler
@@ -13,33 +11,15 @@ from sklearn.preprocessing import MinMaxScaler
 
 def get_dataset(args) -> Tuple[Dataset]:
 
-    src_transform = build_transform(args.input_size, args.input_nc)
-    dst_transform = build_transform(args.input_size, args.output_nc)
+    if args.dataset == "g-fdm":
+        dataset_train = GFDMDataset(args.src_dir, args.dst_dir, args.csv_fpath, args.input_size, split="train")
+        dataset_valid = GFDMDataset(args.src_dir, args.dst_dir, args.csv_fpath, args.input_size, split="valid")
+        dataset_test  = GFDMDataset(args.src_dir, args.dst_dir, args.csv_fpath, args.input_size, split="test")
 
-    if args.dataset == "fdm-color":
-        dataset_train = FDMDataset(args.src_dir, args.dst_dir, args.csv_fpath, args.input_size, split="train", dst_grayscale=False)
-        dataset_valid = FDMDataset(args.src_dir, args.dst_dir, args.csv_fpath, args.input_size, split="valid", dst_grayscale=False)
-        dataset_test  = FDMDataset(args.src_dir, args.dst_dir, args.csv_fpath, args.input_size, split="test", dst_grayscale=False)
-
-    elif args.dataset == "fdm-gray":
-        dataset_train = FDMDataset(args.src_dir, args.dst_dir, args.csv_fpath, args.input_size, split="train")
-        dataset_valid = FDMDataset(args.src_dir, args.dst_dir, args.csv_fpath, args.input_size, split="valid")
-        dataset_test  = FDMDataset(args.src_dir, args.dst_dir, args.csv_fpath, args.input_size, split="test")
-
-    elif args.dataset == "sla-color":
-        dataset_train = SLADataset(args.src_dir, args.dst_dir, args.csv_fpath, args.input_size, split="train", dst_grayscale=False)
-        dataset_valid = SLADataset(args.src_dir, args.dst_dir, args.csv_fpath, args.input_size, split="valid", dst_grayscale=False)
-        dataset_test = SLADataset(args.src_dir, args.dst_dir, args.csv_fpath, args.input_size, split="test", dst_grayscale=False)
-
-    elif args.dataset == "sla-gray":
+    elif args.dataset == "sla":
         dataset_train = SLADataset(args.src_dir, args.dst_dir, args.csv_fpath, args.input_size, split="train")
         dataset_valid = SLADataset(args.src_dir, args.dst_dir, args.csv_fpath, args.input_size, split="valid")
         dataset_test = SLADataset(args.src_dir, args.dst_dir, args.csv_fpath, args.input_size, split="test")
-
-    elif args.dataset == "hdjoong":
-        dataset_train = HDDataset(args.src_dir, args.dst_dir, args.csv_fpath, src_transform, dst_transform, split="train")
-        dataset_valid = HDDataset(args.src_dir, args.dst_dir, args.csv_fpath, src_transform, dst_transform, split="valid")
-        dataset_test = HDDataset(args.src_dir, args.dst_dir, args.csv_fpath, src_transform, dst_transform, split="test")
 
     else:
         raise NotImplementedError(f"Dataset {args.dataset} is not implemented yet")
@@ -79,7 +59,7 @@ def build_transform(input_size, num_channels):
     return transforms.Compose(t)
 
 
-class FDMDataset(Dataset):
+class GFDMDataset(Dataset):
 
     b_lo = np.array([80, 20, 100])  # 수축
     b_hi = np.array([139, 255, 255])
@@ -88,7 +68,7 @@ class FDMDataset(Dataset):
     rp_lo = np.array([140, 20, 100])
     rp_hi = np.array([179, 255, 255])
 
-    def __init__(self, src_dir, dst_dir, csv_fpath, input_size, split, dst_grayscale=True):
+    def __init__(self, src_dir, dst_dir, csv_fpath, input_size, split):
         """도면 이미지, 출력 이미지, 프린터 파라미터, 변형률 정보"""
 
         df = pd.read_csv(csv_fpath, encoding='utf-8-sig').query(f"split=='{split}'")
@@ -101,7 +81,6 @@ class FDMDataset(Dataset):
         self.dst_dir = dst_dir
         self.input_size = input_size
         self.split = split
-        self.dst_grayscale = dst_grayscale
 
     def __getitem__(self, i):
 
@@ -115,20 +94,8 @@ class FDMDataset(Dataset):
         src = resize_and_pad(src, self.input_size)
         dst = resize_and_pad(dst, self.input_size)
 
-        if self.dst_grayscale:
-
-            dst = cv2.cvtColor(np.array(dst), cv2.COLOR_BGR2HSV)
-            b = cv2.inRange(dst, FDMDataset.b_lo, FDMDataset.b_hi)
-            r = cv2.inRange(dst, FDMDataset.ry_lo, FDMDataset.ry_hi) + cv2.inRange(dst, FDMDataset.rp_lo, FDMDataset.rp_hi)
-            target1 = np.where(b > 1, 1., 0.)
-            target2 = np.where(r > 1, 1., 0.)
-            dst = (-target1 + target2 + 1.) * 0.5
-            dst = transforms.functional.to_tensor(dst)
-            dst = transforms.functional.normalize(dst, (0.5,), (0.5,))
-
-        else:
-            dst = transforms.functional.to_tensor(dst)
-            dst = transforms.functional.normalize(dst, (0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+        dst = transforms.functional.to_tensor(dst)
+        dst = transforms.functional.normalize(dst, (0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
 
         src = transforms.functional.to_tensor(src)
         src = transforms.functional.normalize(src, (.5,), (.5,))
@@ -145,7 +112,7 @@ class FDMDataset(Dataset):
 
 class SLADataset(Dataset):
 
-    def __init__(self, src_dir, dst_dir, csv_fpath, input_size, split, dst_grayscale=True):
+    def __init__(self, src_dir, dst_dir, csv_fpath, input_size, split):
         """도면 이미지, 출력 이미지, 프린터 파라미터, 변형률 정보"""
 
         df = pd.read_csv(csv_fpath, encoding='utf-8-sig').query(f"split=='{split}'")
@@ -158,7 +125,6 @@ class SLADataset(Dataset):
         self.dst_dir = dst_dir
         self.input_size = input_size
         self.split = split
-        self.dst_grayscale = dst_grayscale
 
     def __getitem__(self, i):
         src_fpath = os.path.join(self.src_dir, self.src_images[i])
@@ -181,56 +147,6 @@ class SLADataset(Dataset):
         real_error = self.real_error[i]
 
         return src, dst, conditions, real_error
-
-    def __len__(self):
-        return len(self.dst_images)
-
-
-class HDDataset(Dataset):
-
-    def __init__(self, src_dir, dst_dir, csv_fpath, src_transform, dst_transform, split):
-
-        """도면 이미지, 출력 이미지, 메타데이터"""
-        df = pd.read_csv(csv_fpath, encoding='utf-8').query(f"split=='{split}'").drop(columns=["split"])
-        self.split = split
-        self.src_images = [os.path.join(src_dir, x) for x in df.src.values]
-        self.dst_images = [os.path.join(dst_dir, x) for x in df.dst.values]
-        self.conditions = df.iloc[:, 2:].values
-
-        self.src_transform = src_transform
-        self.dst_transform = dst_transform
-
-    def __getitem__(self, i):
-
-        src = Image.open(self.src_images[i])
-        src = ImageOps.grayscale(src)
-
-        dst = Image.open(self.dst_images[i])
-        dst = ImageOps.grayscale(dst)
-
-        if self.split == "train":
-
-            # random horizontal flip
-            if random.random() > 0.5:
-                src = transforms.functional.hflip(src)
-                dst = transforms.functional.hflip(dst)
-
-            # random vertical flip
-            if random.random() > 0.5:
-                src = transforms.functional.vflip(src)
-                dst = transforms.functional.vflip(dst)
-
-            # random rotation
-            angle = random.randint(-10, 10)
-            src = transforms.functional.rotate(src, angle)
-            dst = transforms.functional.rotate(dst, angle)
-
-        src = self.src_transform(src)
-        dst = self.dst_transform(dst)
-
-        conditions = self.conditions[i]
-
-        return src, dst, conditions
 
     def __len__(self):
         return len(self.dst_images)

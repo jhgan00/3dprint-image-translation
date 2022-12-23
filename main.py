@@ -21,9 +21,9 @@ def get_args():
 
     parser.add_argument('--gan_mode', type=str, default='lsgan',
                         help='the type of GAN objective. [vanilla| lsgan | wgangp]. vanilla GAN loss is the cross-entropy objective used in the original GAN paper.')
-    parser.add_argument('--lambda_VGG', type=float, default=100.,
+    parser.add_argument('--lambda_VGG', type=float, default=10.,
                         help='weight for the content(VGG) loss (originally proposed in SRGAN)')
-    parser.add_argument('--lambda_REG', type=float, default=100)
+    parser.add_argument('--lambda_REG', type=float, default=1)
     parser.add_argument('--feature_layers', type=int, nargs="+", default=[0, 1, 2, 3])
     parser.add_argument('--style_layers', type=int, nargs="+", default=[])
     parser.add_argument('--max_grad_norm', type=float, default=0.0)
@@ -32,17 +32,17 @@ def get_args():
     # model parameters
     parser.add_argument('--netG', type=str, default='resnet', choices=['unet', 'resnet', 'zip_resnet', 'zip_unet', 'zip_block'])
     parser.add_argument('--norm_type', default='instance', type=str, choices=['batch', 'instance', 'none'])
-    parser.add_argument('--dropout-D', default=0.5, type=float)
+    parser.add_argument('--dropout-D', default=0.75, type=float)
     parser.add_argument('--dropout-G', default=0.5, type=float)
     parser.add_argument('--input_nc', type=int, default=1,
                         help='# of input image channels: 3 for RGB and 1 for grayscale')
     parser.add_argument('--output_nc', type=int, default=1,
                         help='# of output image channels: 3 for RGB and 1 for grayscale')
     parser.add_argument('--ngf', type=int, default=64, help='# of gen filters in the last conv layer')
-    parser.add_argument('--ndf', type=int, default=64, help='# of disc filters in the first conv layer')
+    parser.add_argument('--ndf', type=int, default=32, help='# of disc filters in the first conv layer')
     parser.add_argument('--n_heads', type=int, default=4)
     parser.add_argument('--n_layers_G', type=int, default=9, help='only used if netD==n_layers')
-    parser.add_argument('--n_layers_D', type=int, default=2, help='only used if netD==n_layers')
+    parser.add_argument('--n_layers_D', type=int, default=3, help='only used if netD==n_layers')
     parser.add_argument('--n-regs', type=int, default=6, help='number of regression targets')
     parser.add_argument('--init_type', type=str, default='normal',
                         help='network initialization [normal | xavier | kaiming | orthogonal]')
@@ -50,12 +50,12 @@ def get_args():
                         help='scaling factor for normal, xavier and orthogonal.')
 
     # dataset parameters
-    parser.add_argument('--dataset', type=str, default='sla-color', choices=['sla-color', 'fdm-color', 'hdjoong'])
-    parser.add_argument('--src_dir', type=str, default='./data/tdp-sla/Blueprint')
-    parser.add_argument('--dst_dir', type=str, default='./data/tdp-sla/Mash')
-    parser.add_argument('--csv_fpath', type=str, default='./data/tdp-sla/Metadata/data.SLA.csv')
+    parser.add_argument('--dataset', type=str, default='g-fdm', choices=['sla', 'g-fdm', 'hdjoong'])
+    parser.add_argument('--src_dir', type=str, default='./data/g-fdm/Blueprint')
+    parser.add_argument('--dst_dir', type=str, default='./data/g-fdm/Mash')
+    parser.add_argument('--csv_fpath', type=str, default='./data/g-fdm/Metadata/data.G-FDM.latest.csv')
     parser.add_argument('--num_threads', default=4, type=int, help='# threads for loading data')
-    parser.add_argument('--batch_size', type=int, default=1, help='input batch size')
+    parser.add_argument('--batch_size', type=int, default=4, help='input batch size')
     parser.add_argument('--input_size', type=int, default=[512, 512], nargs="+", help='input size. empty for no resizing')
 
     # training parameters
@@ -63,16 +63,16 @@ def get_args():
     parser.add_argument('--n_epochs_decay', type=int, default=100,
                         help='number of epochs with the initial learning rate')
     parser.add_argument('--beta1', type=float, default=0.5, help='momentum term of adam')
-    parser.add_argument('--weight_decay_G', type=float, default=1e-5)
-    parser.add_argument('--weight_decay_D', type=float, default=1e-5)
+    parser.add_argument('--weight_decay_G', type=float, default=1e-4)
+    parser.add_argument('--weight_decay_D', type=float, default=1e-2)
     parser.add_argument('--lr', type=float, default=1e-4, help='initial learning rate for adam')
     parser.add_argument('--lr_decay_iters', type=int, default=25)
 
     # misc
     parser.add_argument('--device', type=str, default='cuda:2')
-    parser.add_argument('--checkpoint_dir', type=str, default='./checkpoints', help='models are saved here')
-    parser.add_argument('--log_dir', type=str, default='./logs/translation')
-    parser.add_argument('--output_dir', type=str, default='./outputs')
+    parser.add_argument('--checkpoint_dir', type=str, default='./experiments/checkpoints', help='models are saved here')
+    parser.add_argument('--log_dir', type=str, default='./experiments/logs')
+    parser.add_argument('--output_dir', type=str, default='./experiments/outputs')
     parser.add_argument('--log_freq', type=int, default=10)
     parser.add_argument('--display_freq', type=int, default=10)
     parser.add_argument('--ckpt_freq', type=int, default=50, help='save model for evey n epochs')
@@ -90,7 +90,7 @@ def get_args():
         os.makedirs(os.path.join(args.output_dir, "real"))
     if not os.path.exists(os.path.join(args.output_dir, "fake")):
         os.makedirs(os.path.join(args.output_dir, "fake"))
-        torch.save(args, os.path.join(args.output_dir, "fake", "args.pt"))
+        torch.save(args, os.path.join(args.checkpoint_dir,  "args.pt"))
     args.total_epochs = args.n_epochs + args.n_epochs_decay
     return args
 

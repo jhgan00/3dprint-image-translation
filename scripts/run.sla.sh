@@ -1,4 +1,4 @@
-DATASET="sla-color"
+DATASET="sla"
 python main.py \
 --dataset $DATASET \
 --n_epochs 100 \
