@@ -9,7 +9,7 @@ python main.py \
 --n_layers_G 9 \
 --n_layers_D 3 \
 --ndf 32 \
---dataset "fdm-color" \
+--dataset $DATASET \
 --src_dir "./data/g-fdm/Blueprint" \
 --dst_dir "./data/g-fdm/Mash" \
 --csv_fpath "./data/g-fdm/Metadata/data.G-FDM.latest.csv" \
@@ -19,7 +19,7 @@ python main.py \
 --checkpoint_dir ./experiments/$DATASET/checkpoints \
 --dropout-D 0.75 \
 --dropout-G 0.5 \
---expr_name G-FDM-OOO \
+--expr_name g-fdm \
 --lambda_VGG 10 \
 --lambda_REG 1 \
 --max_grad_norm 0. \
