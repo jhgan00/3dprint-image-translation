@@ -52,13 +52,92 @@ def mean_absolute_cri_error(pred, true, max_rad=100, return_error_array=False):
         return abs_error.mean()
 
 
-def mean_pixel_loss(pred, true, p=1):
+def mean_pixel_loss(pred, true, device='cpu'):
     """
     :param pred: torch.Tensor (N x H x W)
     :param true: torch.Tensor (N x H x W)
     :return: 픽셀 로스
     """
     assert pred.shape == true.shape
-    pred = torch.Tensor(pred).type(torch.float32)
-    true = torch.Tensor(true).type(torch.float32)
-    return torch.linalg.norm(pred - true, p, (1, 2)).mean().item()
+    pred = pred.to(device)
+    true = true.to(device)
+
+    return (pred - true).abs().sum(dim=list(range(1, len(pred.shape)))).mean()
+
+
+def pixel_loss_with_mask(pred, true, device='cpu', sensitivity=15):
+    """
+    :param pred: torch.Tensor (N x C x H x W), -1 ~ 1
+    :param true: torch.Tensor (N x C x H x W), -1 ~ 1
+    :return: 픽셀 로스
+    """
+    import cv2
+
+    assert pred.shape == true.shape
+    pred = pred.to(device).type(torch.float32)
+    true = true.to(device).type(torch.float32)
+
+    masks = []
+    imgs = true * 0.5 + 0.5
+    imgs *= 255
+    imgs = imgs.detach().cpu().numpy().transpose(0, 2, 3, 1).astype(np.uint8)  # N x H x W x C
+    for x in imgs:
+        x = cv2.cvtColor(x, cv2.COLOR_RGB2HSV)
+        lower = np.array([0, 0, 255 - sensitivity])
+        upper = np.array([255, sensitivity, 255])
+        mask = cv2.inRange(x, lower, upper)  # H x W
+        masks.append(mask)
+
+    masks = np.stack(masks)  # N x H x W
+    masks = (masks == 0).astype(int)
+    masks = torch.Tensor(masks).to(device).unsqueeze(1)  # N x 1 x H x W
+
+    return ((pred - true) * masks).abs().sum(dim=(1, 2, 3)).mean().item()
+
+
+class ScoreMetric:
+
+    def __init__(self):
+        super(ScoreMetric, self).__init__()
+
+    def cal(self, real_error, fake_B, pixel=255):
+        batch = fake_B.shape[0]  # batch size
+        neg_list = []  # negative error list, batch size length
+        pos_list = []  # positive error list, batch size length
+        error_list = []  # error list, batch size length
+        error_rate_list = []  # error rate list, batch size length
+
+        for i in range(batch):
+            fake = fake_B[i].cpu()
+            neg_num = (fake < 0).sum()  # number of negative value
+            pos_num = (fake > 0).sum()  # number of postive value
+
+            if isinstance(fake, np.ndarray):  # cv2와 ndarray일 때
+                neg = np.where(fake > 0, 0, fake).sum() / (neg_num * pixel)  # negative error
+                pos = np.where(fake < 0, 0, fake).sum() / (pos_num * pixel)  # positive error
+
+            elif isinstance(fake, torch.Tensor):  # tensor 일 때
+                neg = np.where(fake > 0, 0, fake).sum() / neg_num  # negative error
+                pos = np.where(fake < 0, 0, fake).sum() / pos_num  # positive error
+
+            else:
+                raise TypeError
+
+            error = (abs(neg) + pos) / 2  # average error
+            error_rate = abs(real_error[i] - error) / real_error[i]  # error rate
+            neg_list.append(neg)
+            pos_list.append(pos)
+            error_list.append(error)
+            error_rate_list.append(error_rate)
+
+        return neg_list, pos_list, error_list, error_rate_list
+
+
+if __name__ == "__main__":
+    sm = ScoreMetric()
+
+    x = torch.normal(0, 1, (1, 224, 224))
+    y = torch.normal(0, 1, (1, 224, 224))
+
+    sm.cal(x, y)
+
