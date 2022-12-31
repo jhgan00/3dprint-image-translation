@@ -1,0 +1,6 @@
+data/
+experiments/
+checkpoints/
+logs/
+test_images/
+venv/
